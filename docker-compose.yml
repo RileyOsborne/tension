@@ -1,0 +1,28 @@
+services:
+  app:
+    build:
+      context: .
+      target: production
+    container_name: tension-app
+    restart: unless-stopped
+    ports:
+      - "8888:80"
+    volumes:
+      # Persist SQLite database
+      - ./database/database.sqlite:/var/www/html/database/database.sqlite
+    environment:
+      - APP_NAME=Tension
+      - APP_ENV=production
+      - APP_DEBUG=false
+      - APP_URL=${APP_URL:-http://localhost:8888}
+      - APP_KEY=${APP_KEY}
+      - DB_CONNECTION=sqlite
+      - SESSION_DRIVER=database
+      - CACHE_STORE=database
+      - QUEUE_CONNECTION=sync
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/up"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
