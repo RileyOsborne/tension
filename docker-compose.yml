@@ -8,14 +8,12 @@ services:
     ports:
       - "8888:80"
     volumes:
-      # Persist SQLite database
-      - ./database/database.sqlite:/var/www/html/database/database.sqlite
+      - tension-data:/var/www/html/database
     environment:
       - APP_NAME=Tension
       - APP_ENV=production
       - APP_DEBUG=false
-      - APP_URL=${APP_URL:-http://localhost:8888}
-      - APP_KEY=${APP_KEY}
+      - APP_URL=http://localhost:8888
       - DB_CONNECTION=sqlite
       - SESSION_DRIVER=database
       - CACHE_STORE=database
@@ -26,3 +24,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 10s
+
+volumes:
+  tension-data:

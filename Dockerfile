@@ -56,6 +56,8 @@ RUN rm -rf node_modules tests .env.example
 COPY docker/nginx.conf /etc/nginx/http.d/default.conf
 COPY docker/supervisord.conf /etc/supervisord.conf
 COPY docker/php.ini /usr/local/etc/php/conf.d/custom.ini
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 # Create required directories and set permissions
 RUN mkdir -p /var/www/html/storage/logs \
@@ -74,4 +76,4 @@ RUN touch /var/www/html/database/database.sqlite \
 
 EXPOSE 80
 
-CMD ["/usr/bin/supervisord", "-c", "/etc/supervisord.conf"]
+ENTRYPOINT ["/entrypoint.sh"]
