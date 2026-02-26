@@ -112,6 +112,106 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
         return true;
     }
 
+    /**
+     * Find a matching answer using fuzzy matching.
+     * Handles cases like "El Fuego" matching "Fuego" or "The Beatles" matching "Beatles".
+     */
+    public function findMatchingAnswer(string $input): ?Answer
+    {
+        if (!$this->currentRound) return null;
+
+        $input = trim($input);
+        $inputLower = strtolower($input);
+        $inputNormalized = $this->normalizeForMatching($input);
+
+        // First try exact match against full text (case-insensitive)
+        foreach ($this->currentRound->category->answers as $answer) {
+            if (strtolower($answer->text) === $inputLower) {
+                return $answer;
+            }
+        }
+
+        // Try exact match against display_text (for geo answers)
+        foreach ($this->currentRound->category->answers as $answer) {
+            if (strtolower($answer->display_text) === $inputLower) {
+                return $answer;
+            }
+        }
+
+        // Try normalized match against both text and display_text
+        foreach ($this->currentRound->category->answers as $answer) {
+            $answerNormalized = $this->normalizeForMatching($answer->text);
+            $displayNormalized = $this->normalizeForMatching($answer->display_text);
+
+            if ($answerNormalized === $inputNormalized || $displayNormalized === $inputNormalized) {
+                return $answer;
+            }
+        }
+
+        // Try containment match (input contains answer or answer contains input)
+        foreach ($this->currentRound->category->answers as $answer) {
+            $answerNormalized = $this->normalizeForMatching($answer->text);
+            $displayNormalized = $this->normalizeForMatching($answer->display_text);
+
+            // Check if one is contained in the other (for "El Fuego" vs "Fuego")
+            foreach ([$answerNormalized, $displayNormalized] as $targetNormalized) {
+                if (str_contains($inputNormalized, $targetNormalized) || str_contains($targetNormalized, $inputNormalized)) {
+                    // Only match if the shorter string is at least 4 chars to avoid false positives
+                    $shorter = strlen($inputNormalized) < strlen($targetNormalized) ? $inputNormalized : $targetNormalized;
+                    if (strlen($shorter) >= 4) {
+                        return $answer;
+                    }
+                }
+            }
+        }
+
+        // Try similarity match using Levenshtein distance
+        $bestMatch = null;
+        $bestScore = PHP_INT_MAX;
+
+        foreach ($this->currentRound->category->answers as $answer) {
+            foreach ([$answer->text, $answer->display_text] as $target) {
+                $targetNormalized = $this->normalizeForMatching($target);
+
+                // Calculate Levenshtein distance
+                $distance = levenshtein($inputNormalized, $targetNormalized);
+
+                // Allow max 2 character difference for strings > 5 chars, or 1 for shorter
+                $maxDistance = strlen($targetNormalized) > 5 ? 2 : 1;
+
+                if ($distance <= $maxDistance && $distance < $bestScore) {
+                    $bestScore = $distance;
+                    $bestMatch = $answer;
+                }
+            }
+        }
+
+        return $bestMatch;
+    }
+
+    /**
+     * Normalize a string for matching by removing articles, punctuation, and extra spaces.
+     */
+    private function normalizeForMatching(string $text): string
+    {
+        $text = strtolower(trim($text));
+
+        // Remove common articles/prefixes in various languages
+        $articles = ['the ', 'a ', 'an ', 'el ', 'la ', 'los ', 'las ', 'le ', 'les ', 'der ', 'die ', 'das '];
+        foreach ($articles as $article) {
+            if (str_starts_with($text, $article)) {
+                $text = substr($text, strlen($article));
+                break;
+            }
+        }
+
+        // Remove punctuation and extra spaces
+        $text = preg_replace('/[^\w\s]/', '', $text);
+        $text = preg_replace('/\s+/', ' ', $text);
+
+        return trim($text);
+    }
+
     public function dismissRules(): void
     {
         $this->showRules = false;
@@ -141,9 +241,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
             ->where('player_id', $playerId)
             ->delete();
 
-        // Find matching answer (case-insensitive)
-        $answer = $this->currentRound->category->answers
-            ->first(fn($a) => strtolower($a->text) === strtolower($answerText));
+        // Find matching answer using fuzzy matching
+        $answer = $this->findMatchingAnswer($answerText);
 
         // If match found, use its points; otherwise it's "not on list" = -3
         $points = $answer ? $answer->points : -3;
@@ -241,6 +340,46 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
         $this->broadcastState();
     }
 
+    public function correctAnswer(string $playerId, string $answerId): void
+    {
+        if (!$this->currentRound) return;
+
+        $playerAnswer = PlayerAnswer::where('round_id', $this->currentRound->id)
+            ->where('player_id', $playerId)
+            ->first();
+
+        if (!$playerAnswer) return;
+
+        $newAnswer = $this->currentRound->category->answers->find($answerId);
+        if (!$newAnswer) return;
+
+        $oldPoints = $playerAnswer->points_awarded;
+        $newPoints = $newAnswer->points;
+
+        // Apply double if it was doubled
+        if ($playerAnswer->was_doubled) {
+            $newPoints *= 2;
+        }
+
+        $playerAnswer->update([
+            'answer_id' => $newAnswer->id,
+            'points_awarded' => $newPoints,
+        ]);
+
+        // Recalculate player's total score
+        $player = Player::find($playerId);
+        if ($player) {
+            $total = PlayerAnswer::where('player_id', $player->id)
+                ->whereHas('round', fn($q) => $q->where('game_id', $this->game->id))
+                ->sum('points_awarded');
+            $player->update(['total_score' => $total]);
+        }
+
+        $this->currentRound->refresh();
+        $this->game->refresh();
+        $this->broadcastState();
+    }
+
     public function nextRound(): void
     {
         if (!$this->currentRound) return;
@@ -289,7 +428,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
 
                     $revealedAnswersData[] = [
                         'position' => $answer->position,
-                        'text' => $answer->text,
+                        'text' => $answer->display_text, // Use display_text to hide geographic identifiers
                         'stat' => $answer->stat,
                         'points' => $answer->points,
                         'is_tension' => $answer->is_tension,
@@ -422,7 +561,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                             </div>
 
                             <div class="space-y-4">
-                                @foreach($players as $player)
+                                @foreach($players->sortBy('position') as $player)
                                     @php
                                         $hasAnswer = !empty($playerAnswers[$player->id] ?? '');
                                         $existingAnswer = $playerAnswerMap[$player->id] ?? null;
@@ -445,16 +584,18 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                                                            class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
 
                                                     <!-- Autocomplete dropdown -->
-                                                    <div x-show="open && $wire.playerAnswers['{{ $player->id }}']?.length > 0"
+                                                    <div x-show="open"
                                                          x-cloak
-                                                         class="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg max-h-48 overflow-auto">
+                                                         class="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg max-h-48 overflow-auto"
+                                                         x-data="{ input: '' }"
+                                                         x-effect="input = ($wire.playerAnswers['{{ $player->id }}'] || '').toLowerCase()">
                                                         @foreach($answers as $answer)
                                                             <button type="button"
-                                                                    x-show="'{{ strtolower($answer->text) }}'.includes(($wire.playerAnswers['{{ $player->id }}'] || '').toLowerCase())"
-                                                                    @click="$wire.set('playerAnswers.{{ $player->id }}', '{{ $answer->text }}'); open = false; $wire.submitPlayerAnswer('{{ $player->id }}')"
+                                                                    x-show="input.length > 0 && '{{ strtolower(addslashes($answer->display_text)) }}'.includes(input)"
+                                                                    @click="$wire.set('playerAnswers.{{ $player->id }}', '{{ addslashes($answer->display_text) }}'); open = false; $wire.submitPlayerAnswer('{{ $player->id }}')"
                                                                     class="w-full text-left px-4 py-2 hover:bg-slate-700 transition {{ $answer->is_tension ? 'text-red-400' : '' }}">
                                                                 <span class="text-slate-500 mr-2">#{{ $answer->position }}</span>
-                                                                {{ $answer->text }}
+                                                                {{ $answer->display_text }}
                                                             </button>
                                                         @endforeach
                                                     </div>
@@ -646,13 +787,30 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                             <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                                 @foreach($players as $player)
                                     @php $pa = $playerAnswerMap[$player->id] ?? null; @endphp
-                                    <div class="bg-slate-900 rounded-lg p-3">
+                                    <div class="bg-slate-900 rounded-lg p-3" x-data="{ editing: false }">
                                         <div class="font-bold text-sm" style="color: {{ $player->color }}">{{ $player->name }}</div>
                                         @if($pa)
-                                            <div class="text-slate-300 mt-1">{{ $pa['answer_text'] }}</div>
-                                            <div class="text-xs {{ $pa['points'] >= 0 ? 'text-green-400' : 'text-red-400' }} mt-1">
-                                                {{ $pa['points'] > 0 ? '+' : '' }}{{ $pa['points'] }} pts
-                                                @if($pa['was_doubled']) (doubled) @endif
+                                            <div x-show="!editing">
+                                                <div class="text-slate-300 mt-1">{{ $pa['answer_text'] }}</div>
+                                                <div class="flex items-center justify-between mt-1">
+                                                    <span class="text-xs {{ $pa['points'] >= 0 ? 'text-green-400' : 'text-red-400' }}">
+                                                        {{ $pa['points'] > 0 ? '+' : '' }}{{ $pa['points'] }} pts
+                                                        @if($pa['was_doubled']) (2x) @endif
+                                                    </span>
+                                                    <button @click="editing = true" class="text-xs text-blue-400 hover:text-blue-300">Edit</button>
+                                                </div>
+                                            </div>
+                                            <div x-show="editing" x-cloak class="mt-1">
+                                                <select @change="$wire.correctAnswer('{{ $player->id }}', $event.target.value); editing = false"
+                                                        class="w-full text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white">
+                                                    <option value="">Select correct answer...</option>
+                                                    @foreach($answers as $answer)
+                                                        <option value="{{ $answer->id }}" {{ $pa['answer']?->id === $answer->id ? 'selected' : '' }}>
+                                                            #{{ $answer->position }} {{ $answer->display_text }} ({{ $answer->points > 0 ? '+' : '' }}{{ $answer->points }})
+                                                        </option>
+                                                    @endforeach
+                                                </select>
+                                                <button @click="editing = false" class="text-xs text-slate-400 hover:text-slate-300 mt-1">Cancel</button>
                                             </div>
                                         @else
                                             <div class="text-slate-500 mt-1">No answer</div>
@@ -703,7 +861,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                         </div>
                     </div>
 
-                    <!-- Category Reference -->
+                    <!-- Category Reference (GM only - shows full text) -->
                     @if($currentRound && in_array($currentRound->status, ['collecting', 'revealing', 'tension']))
                         <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
                             <h3 class="text-sm text-slate-400 mb-2">Answer Reference</h3>
@@ -736,29 +894,32 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
             window.tensionChannel = channel;
             console.log('[Control] BroadcastChannel initialized for game:', gameId);
 
-            // Listen for Livewire events - remove any existing listener first
-            if (window.tensionStateListener) {
-                Livewire.off('game-state-updated', window.tensionStateListener);
-            }
-            window.tensionStateListener = function(params) {
-                const state = params.state || params;
+            // Listen for Livewire 3 dispatched events
+            document.addEventListener('game-state-updated', function(event) {
+                const state = event.detail.state || event.detail;
                 console.log('[Control] Broadcasting state:', state);
                 channel.postMessage(state);
-            };
-            Livewire.on('game-state-updated', window.tensionStateListener);
+            });
 
             channel.onmessage = function(event) {
                 console.log('[Control] Received message:', event.data);
                 if (event.data && event.data.type === 'request-state') {
-                    console.log('[Control] Presentation requested state, broadcasting...');
-                    Livewire.dispatch('broadcast-state');
+                    console.log('[Control] Presentation requested state, triggering refresh...');
+                    // Find the Livewire component and call broadcastState
+                    const component = Livewire.all()[0];
+                    if (component) {
+                        component.$wire.handleBroadcastState();
+                    }
                 }
             };
 
             // Broadcast initial state after a short delay
             setTimeout(function() {
                 console.log('[Control] Sending initial broadcast');
-                Livewire.dispatch('broadcast-state');
+                const component = Livewire.all()[0];
+                if (component) {
+                    component.$wire.handleBroadcastState();
+                }
             }, 500);
         })();
     </script>

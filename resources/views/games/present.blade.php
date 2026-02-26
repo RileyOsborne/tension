@@ -135,7 +135,7 @@
                 'description' => $round->category->description,
                 'answers' => $round->category->answers->sortBy('position')->map(fn($a) => [
                     'position' => $a->position,
-                    'text' => $a->text,
+                    'text' => $a->display_text, // Use display_text to hide geographic identifiers
                     'stat' => $a->stat,
                     'points' => $a->points,
                     'is_tension' => $a->is_tension,

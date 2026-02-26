@@ -29,6 +29,9 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
     {
         $this->game = $game->load(['players', 'rounds.category']);
 
+        // Fix any players with position 0 (from before position tracking was added)
+        $this->fixPlayerPositions();
+
         // Initialize round categories from existing rounds
         foreach ($game->rounds as $round) {
             $this->roundCategories[$round->round_number] = $round->category_id;
@@ -36,6 +39,19 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
         // Initialize empty category answers
         $this->resetCategoryForm();
+    }
+
+    private function fixPlayerPositions(): void
+    {
+        $playersNeedingPositions = $this->game->players()->where('position', 0)->get();
+        if ($playersNeedingPositions->isEmpty()) return;
+
+        $maxPosition = $this->game->players()->max('position') ?? 0;
+        foreach ($playersNeedingPositions as $player) {
+            $maxPosition++;
+            $player->update(['position' => $maxPosition]);
+        }
+        $this->game->refresh();
     }
 
     public function with(): array
@@ -173,10 +189,13 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             return;
         }
 
+        $nextPosition = $this->game->players()->count() + 1;
+
         Player::create([
             'game_id' => $this->game->id,
             'name' => $this->newPlayerName,
             'color' => $this->newPlayerColor,
+            'position' => $nextPosition,
         ]);
 
         $this->newPlayerName = '';
@@ -188,7 +207,22 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
     {
         $player->delete();
         $this->game->refresh();
+
+        // Reorder remaining players to ensure sequential positions
+        $this->game->players()->orderBy('position')->get()->each(function ($p, $index) {
+            $p->update(['position' => $index + 1]);
+        });
+
+        $this->game->refresh();
         $this->checkReady();
+    }
+
+    public function reorderPlayers(array $orderedIds): void
+    {
+        foreach ($orderedIds as $position => $playerId) {
+            Player::where('id', $playerId)->update(['position' => $position + 1]);
+        }
+        $this->game->refresh();
     }
 
     public function setRoundCategory(int $roundNumber, ?string $categoryId): void
@@ -312,16 +346,37 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                     Players ({{ $game->players->count() }}/{{ $game->player_count }})
                 </h2>
 
-                <!-- Existing Players -->
-                <div class="space-y-3 mb-6">
-                    @forelse($game->players as $player)
-                        <div class="flex items-center justify-between bg-slate-900 rounded-lg px-4 py-3">
+                <!-- Existing Players (drag to reorder) -->
+                <div class="space-y-2 mb-6"
+                     x-data
+                     x-init="
+                        if (typeof Sortable !== 'undefined') {
+                            Sortable.create($el, {
+                                animation: 150,
+                                ghostClass: 'opacity-50',
+                                handle: '.drag-handle',
+                                onEnd: function(evt) {
+                                    const items = Array.from(evt.to.children).map(el => el.dataset.playerId);
+                                    $wire.reorderPlayers(items);
+                                }
+                            });
+                        }
+                     "
+                     wire:key="player-list-{{ $game->players->pluck('id')->join('-') }}">
+                    @forelse($game->players->sortBy('position') as $player)
+                        <div class="flex items-center justify-between bg-slate-900 rounded-lg px-4 py-3 group"
+                             data-player-id="{{ $player->id }}">
                             <div class="flex items-center gap-3">
+                                <div class="drag-handle cursor-grab active:cursor-grabbing text-slate-600 hover:text-slate-400 transition">
+                                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 8h16M4 16h16"/>
+                                    </svg>
+                                </div>
                                 <div class="w-4 h-4 rounded-full" style="background-color: {{ $player->color }}"></div>
                                 <span class="font-medium">{{ $player->name }}</span>
                             </div>
                             <button wire:click="removePlayer('{{ $player->id }}')"
-                                    class="text-red-400 hover:text-red-300 text-sm">
+                                    class="text-red-400 hover:text-red-300 text-sm opacity-0 group-hover:opacity-100 transition">
                                 Remove
                             </button>
                         </div>

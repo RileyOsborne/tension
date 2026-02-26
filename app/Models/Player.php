@@ -16,6 +16,7 @@ class Player extends Model
         'game_id',
         'name',
         'color',
+        'position',
         'total_score',
         'double_used',
     ];
