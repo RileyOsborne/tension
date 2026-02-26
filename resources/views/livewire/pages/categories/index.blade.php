@@ -17,6 +17,10 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     public string $sortBy = 'title';
     public string $sortDirection = 'asc';
 
+    // Confirmation modals
+    public bool $showImportModal = false;
+    public bool $showRemoveModal = false;
+
     public function updatedPerPage(): void
     {
         $this->resetPage();
@@ -128,6 +132,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
 
     public function importStarterPack(): void
     {
+        $this->showImportModal = false;
         $path = database_path('data/starter-categories.json');
 
         if (!file_exists($path)) {
@@ -175,6 +180,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
 
     public function removeStarterPack(): void
     {
+        $this->showRemoveModal = false;
         $count = Category::where('is_starter', true)->count();
         Category::where('is_starter', true)->delete();
         session()->flash('message', "Removed {$count} starter pack categories.");
@@ -184,6 +190,32 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     {
         return Category::where('is_starter', true)->exists();
     }
+
+    public function getStarterPackCount(): int
+    {
+        $path = database_path('data/starter-categories.json');
+        if (!file_exists($path)) {
+            return 0;
+        }
+        $data = json_decode(file_get_contents($path), true);
+        return count($data['categories'] ?? []);
+    }
+
+    public function confirmImport(): void
+    {
+        $this->showImportModal = true;
+    }
+
+    public function confirmRemove(): void
+    {
+        $this->showRemoveModal = true;
+    }
+
+    public function closeModals(): void
+    {
+        $this->showImportModal = false;
+        $this->showRemoveModal = false;
+    }
 }; ?>
 
 <div>
@@ -192,14 +224,12 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
             <h1 class="text-3xl font-bold">Categories</h1>
             <div class="flex gap-3">
                 @if($this->hasStarterPack())
-                    <button wire:click="removeStarterPack"
-                            wire:confirm="Remove all starter pack categories? This cannot be undone."
+                    <button wire:click="confirmRemove"
                             class="bg-red-600/20 hover:bg-red-600/30 text-red-400 px-4 py-3 rounded-lg font-semibold transition border border-red-600/50">
                         Remove Starter Pack
                     </button>
                 @else
-                    <button wire:click="importStarterPack"
-                            wire:confirm="Import the starter category pack? This will add 30 ready-to-play categories."
+                    <button wire:click="confirmImport"
                             class="bg-slate-700 hover:bg-slate-600 text-white px-4 py-3 rounded-lg font-semibold transition">
                         Import Starter Pack
                     </button>
@@ -383,7 +413,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
                             </div>
                         </div>
                         <div>
-                            {{ $categories->links() }}
+                            {{ $categories->links('vendor.livewire.simple') }}
                         </div>
                     </div>
                 @endif
@@ -426,6 +456,75 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    <!-- Import Starter Pack Modal -->
+    @if($showImportModal)
+        <div class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
+            <div class="flex min-h-screen items-center justify-center p-4">
+                <div class="fixed inset-0 bg-black/70 transition-opacity" wire:click="closeModals"></div>
+
+                <div class="relative bg-slate-800 rounded-xl shadow-xl w-full max-w-md border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+                        <h3 class="text-lg font-bold">Import Starter Pack</h3>
+                        <button wire:click="closeModals" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+                    </div>
+
+                    <div class="p-6">
+                        <p class="text-slate-300 mb-6">
+                            This will add <span class="font-semibold text-white">{{ $this->getStarterPackCount() }} ready-to-play categories</span> across multiple topics to help you get started.
+                        </p>
+
+                        <div class="flex justify-end gap-3">
+                            <button wire:click="closeModals"
+                                    class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium transition">
+                                Cancel
+                            </button>
+                            <button wire:click="importStarterPack" wire:click.prefetch="closeModals"
+                                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition">
+                                Import
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    <!-- Remove Starter Pack Modal -->
+    @if($showRemoveModal)
+        <div class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
+            <div class="flex min-h-screen items-center justify-center p-4">
+                <div class="fixed inset-0 bg-black/70 transition-opacity" wire:click="closeModals"></div>
+
+                <div class="relative bg-slate-800 rounded-xl shadow-xl w-full max-w-md border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+                        <h3 class="text-lg font-bold text-red-400">Remove Starter Pack</h3>
+                        <button wire:click="closeModals" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+                    </div>
+
+                    <div class="p-6">
+                        <p class="text-slate-300 mb-2">
+                            This will remove all starter pack categories from your library.
+                        </p>
+                        <p class="text-slate-400 text-sm mb-6">
+                            You can always import them again later.
+                        </p>
+
+                        <div class="flex justify-end gap-3">
+                            <button wire:click="closeModals"
+                                    class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium transition">
+                                Cancel
+                            </button>
+                            <button wire:click="removeStarterPack" wire:click.prefetch="closeModals"
+                                    class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition">
+                                Remove
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
