@@ -2,6 +2,7 @@
 
 use App\Models\Category;
 use App\Models\Answer;
+use App\Models\Topic;
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
@@ -10,6 +11,8 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
     public Category $category;
     public string $title = '';
     public string $description = '';
+    public ?string $topicId = null;
+    public string $newTopicName = '';
     public array $answers = [];
     public array $answerStats = [];
     public string $bulkAnswers = '';
@@ -19,6 +22,7 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
         $this->category = $category;
         $this->title = $category->title;
         $this->description = $category->description ?? '';
+        $this->topicId = $category->topic_id;
 
         // Initialize 15 answer slots
         for ($i = 1; $i <= 15; $i++) {
@@ -31,6 +35,13 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
             $this->answers[$answer->position] = $answer->text;
             $this->answerStats[$answer->position] = $answer->stat ?? '';
         }
+    }
+
+    public function with(): array
+    {
+        return [
+            'topics' => Topic::orderBy('name')->get(),
+        ];
     }
 
     public function parseBulkAnswers(): void
@@ -99,13 +110,25 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
             'answers.8' => 'required|string|max:255',
             'answers.9' => 'required|string|max:255',
             'answers.10' => 'required|string|max:255',
+            'answers.11' => 'required|string|max:255',
         ], [
+            'answers.11.required' => 'At least 1 tension answer is required.',
             'answers.*.required' => 'Answers 1-10 are required for the Top 10.',
         ]);
+
+        // Handle new topic creation
+        $topicId = $this->topicId;
+        if ($this->topicId === '__new__' && !empty($this->newTopicName)) {
+            $topic = Topic::create(['name' => trim($this->newTopicName)]);
+            $topicId = $topic->id;
+        } elseif ($this->topicId === '__new__') {
+            $topicId = null;
+        }
 
         $this->category->update([
             'title' => $this->title,
             'description' => $this->description ?: null,
+            'topic_id' => $topicId ?: null,
         ]);
 
         // Delete existing answers and recreate
@@ -157,6 +180,25 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
                                   rows="2"
                                   placeholder="Based on 2024 World Population Review data..."
                                   class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-medium text-slate-300 mb-2">Topic</label>
+                        <select wire:model.live="topicId"
+                                class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="">No topic</option>
+                            @foreach($topics as $topic)
+                                <option value="{{ $topic->id }}">{{ $topic->name }}</option>
+                            @endforeach
+                            <option value="__new__">+ Create new topic...</option>
+                        </select>
+
+                        @if($topicId === '__new__')
+                            <input type="text"
+                                   wire:model="newTopicName"
+                                   placeholder="New topic name"
+                                   class="w-full mt-2 bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        @endif
                     </div>
                 </div>
             </div>
@@ -214,8 +256,8 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
 
             <!-- Tension Answers -->
             <div class="bg-slate-800 rounded-xl p-6 border border-red-700/50">
-                <h2 class="text-xl font-semibold mb-2 text-red-400">Tension Answers (Optional)</h2>
-                <p class="text-slate-400 text-sm mb-4">These deduct 5 points each. Add 0-5 tension answers.</p>
+                <h2 class="text-xl font-semibold mb-2 text-red-400">Tension Answers (min 1)</h2>
+                <p class="text-slate-400 text-sm mb-4">These deduct 5 points each. At least 1 required, up to 5.</p>
 
                 <div class="space-y-3">
                     @for($i = 11; $i <= 15; $i++)

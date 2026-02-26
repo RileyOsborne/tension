@@ -3,6 +3,7 @@
 use App\Models\Game;
 use App\Models\Player;
 use App\Models\Category;
+use App\Models\Topic;
 use App\Models\Answer;
 use App\Models\Round;
 use Livewire\Volt\Component;
@@ -17,10 +18,16 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
     public array $roundCategories = [];
 
+    // Category filters
+    public ?string $topicFilter = null;
+    public string $searchQuery = '';
+
     // Category modal
     public bool $showCategoryModal = false;
     public string $categoryTitle = '';
     public string $categoryDescription = '';
+    public ?string $categoryTopicId = null;
+    public string $newTopicName = '';
     public array $categoryAnswers = [];
     public array $categoryAnswerStats = [];
     public string $bulkAnswers = '';
@@ -56,11 +63,33 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
     public function with(): array
     {
-        return [
-            'categories' => Category::whereHas('answers', function ($q) {
+        // Base query for complete categories (10+ answers)
+        $baseQuery = Category::with('topic')
+            ->whereHas('answers', function ($q) {
                 $q->where('position', '<=', 10);
-            }, '>=', 10)->get(),
+            }, '>=', 10);
+
+        // Total count (unfiltered)
+        $totalCategories = (clone $baseQuery)->count();
+
+        // Filtered categories
+        $categories = (clone $baseQuery)
+            ->when($this->topicFilter, fn($q) => $q->where('topic_id', $this->topicFilter))
+            ->when($this->searchQuery, fn($q) => $q->where('title', 'like', "%{$this->searchQuery}%"))
+            ->orderBy('title')
+            ->get();
+
+        return [
+            'categories' => $categories,
+            'totalCategories' => $totalCategories,
+            'topics' => Topic::orderBy('name')->get(),
         ];
+    }
+
+    public function clearFilters(): void
+    {
+        $this->topicFilter = null;
+        $this->searchQuery = '';
     }
 
     public function openCategoryModal(): void
@@ -78,6 +107,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
     {
         $this->categoryTitle = '';
         $this->categoryDescription = '';
+        $this->categoryTopicId = null;
+        $this->newTopicName = '';
         $this->categoryAnswers = [];
         $this->categoryAnswerStats = [];
         $this->bulkAnswers = '';
@@ -153,13 +184,25 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             'categoryAnswers.8' => 'required|string|max:255',
             'categoryAnswers.9' => 'required|string|max:255',
             'categoryAnswers.10' => 'required|string|max:255',
+            'categoryAnswers.11' => 'required|string|max:255',
         ], [
+            'categoryAnswers.11.required' => 'At least 1 tension answer is required.',
             'categoryAnswers.*.required' => 'Answers 1-10 are required.',
         ]);
+
+        // Handle new topic creation
+        $topicId = $this->categoryTopicId;
+        if ($this->categoryTopicId === '__new__' && !empty($this->newTopicName)) {
+            $topic = Topic::create(['name' => trim($this->newTopicName)]);
+            $topicId = $topic->id;
+        } elseif ($this->categoryTopicId === '__new__') {
+            $topicId = null;
+        }
 
         $category = Category::create([
             'title' => $this->categoryTitle,
             'description' => $this->categoryDescription ?: null,
+            'topic_id' => $topicId,
         ]);
 
         foreach ($this->categoryAnswers as $position => $text) {
@@ -227,6 +270,12 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
     public function setRoundCategory(int $roundNumber, ?string $categoryId): void
     {
+        // Handle "create new" option
+        if ($categoryId === '__new__') {
+            $this->openCategoryModal();
+            return;
+        }
+
         if (empty($categoryId)) {
             // Remove round if exists
             $this->game->rounds()->where('round_number', $roundNumber)->delete();
@@ -242,6 +291,28 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
         $this->game->refresh();
         $this->checkReady();
+    }
+
+    public function randomCategory(int $roundNumber): void
+    {
+        // Get available categories (filtered by current filters)
+        $usedCategoryIds = array_values($this->roundCategories);
+        $currentSelection = $this->roundCategories[$roundNumber] ?? null;
+
+        $available = Category::with('topic')
+            ->whereHas('answers', function ($q) {
+                $q->where('position', '<=', 10);
+            }, '>=', 10)
+            ->when($this->topicFilter, fn($q) => $q->where('topic_id', $this->topicFilter))
+            ->when($this->searchQuery, fn($q) => $q->where('title', 'like', "%{$this->searchQuery}%"))
+            ->whereNotIn('id', array_filter($usedCategoryIds, fn($id) => $id !== $currentSelection))
+            ->when($currentSelection, fn($q) => $q->where('id', '!=', $currentSelection))
+            ->inRandomOrder()
+            ->first();
+
+        if ($available) {
+            $this->setRoundCategory($roundNumber, $available->id);
+        }
     }
 
     public function checkReady(): void
@@ -421,41 +492,89 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                     </button>
                 </div>
 
+                <!-- Search -->
+                <div class="mb-3">
+                    <div class="relative">
+                        <svg class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+                        </svg>
+                        <input type="text"
+                               wire:model.live.debounce.200ms="searchQuery"
+                               placeholder="Search categories..."
+                               class="w-full bg-slate-900 border border-slate-600 rounded-lg pl-10 pr-4 py-2 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <!-- Topic Pills -->
+                <div class="flex flex-wrap gap-2 mb-4">
+                    <button wire:click="$set('topicFilter', null)"
+                            class="px-3 py-1 text-sm rounded-full transition {{ $topicFilter === null ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600' }}">
+                        All Topics
+                    </button>
+                    @foreach($topics as $topic)
+                        <button wire:click="$set('topicFilter', '{{ $topic->id }}')"
+                                class="px-3 py-1 text-sm rounded-full transition {{ $topicFilter === $topic->id ? 'bg-blue-600 text-white' : 'bg-slate-700 text-slate-300 hover:bg-slate-600' }}">
+                            {{ $topic->name }}
+                        </button>
+                    @endforeach
+                </div>
+
                 @if($categories->isEmpty())
                     <div class="bg-yellow-900/20 border border-yellow-700 text-yellow-400 px-4 py-3 rounded-lg mb-4">
-                        No categories yet. <button wire:click="openCategoryModal" class="underline">Create one</button> to get started.
+                        @if($topicFilter || $searchQuery)
+                            No categories match your filters.
+                            <button wire:click="clearFilters" class="underline">Clear filters</button>
+                        @else
+                            No categories yet. <button wire:click="openCategoryModal" class="underline">Create one</button> to get started.
+                        @endif
                     </div>
                 @endif
 
-                <div class="space-y-3">
+                <div class="space-y-2">
                     @for($i = 1; $i <= $game->total_rounds; $i++)
-                        <div class="flex items-center gap-3">
-                            <span class="w-12 text-slate-400 text-sm">Round {{ $i }}</span>
-                            <select x-data
-                                    x-on:change="
-                                        if ($event.target.value === '__new__') {
-                                            $wire.openCategoryModal();
-                                            $nextTick(() => { $event.target.value = '{{ $roundCategories[$i] ?? '' }}'; });
-                                        } else {
-                                            $wire.setRoundCategory({{ $i }}, $event.target.value);
-                                        }
-                                    "
-                                    class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="">Select category...</option>
-                                @foreach($categories as $category)
-                                    @php
-                                        $isSelectedForThisRound = ($roundCategories[$i] ?? null) === $category->id;
-                                        $isUsedInOtherRound = !$isSelectedForThisRound && in_array($category->id, $roundCategories);
-                                    @endphp
-                                    @if(!$isUsedInOtherRound)
-                                        <option value="{{ $category->id }}"
-                                                @selected($isSelectedForThisRound)>
-                                            {{ $category->title }}
+                        @php
+                            $selectedCategoryId = $roundCategories[$i] ?? null;
+                            $selectedCategory = $selectedCategoryId ? $categories->firstWhere('id', $selectedCategoryId) : null;
+                            $availableCategories = $categories->filter(function($cat) use ($roundCategories, $i, $selectedCategoryId) {
+                                if ($cat->id === $selectedCategoryId) return true;
+                                return !in_array($cat->id, array_values($roundCategories));
+                            });
+                        @endphp
+                        <div class="flex items-center gap-2 p-2 rounded-lg {{ $selectedCategoryId ? 'bg-slate-900/50' : 'bg-slate-900/30' }}">
+                            <div class="w-8 h-8 rounded-lg {{ $selectedCategoryId ? 'bg-green-600/20 text-green-400' : 'bg-slate-700 text-slate-400' }} flex items-center justify-center text-sm font-bold">
+                                {{ $i }}
+                            </div>
+                            <div class="flex-1 relative">
+                                <select wire:change="setRoundCategory({{ $i }}, $event.target.value)"
+                                        class="w-full bg-slate-800 border {{ $selectedCategoryId ? 'border-slate-600' : 'border-slate-700 border-dashed' }} rounded-lg pl-3 pr-8 py-2 text-sm {{ $selectedCategoryId ? 'text-white' : 'text-slate-400' }} focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent appearance-none cursor-pointer hover:border-slate-500 transition">
+                                    <option value="">Select category...</option>
+                                    @foreach($availableCategories as $category)
+                                        <option value="{{ $category->id }}" {{ $selectedCategoryId === $category->id ? 'selected' : '' }}>
+                                            {{ $category->title }}@if($category->topic) · {{ $category->topic->name }}@endif
                                         </option>
-                                    @endif
-                                @endforeach
-                                <option value="__new__">+ Create new category...</option>
-                            </select>
+                                    @endforeach
+                                    <option value="__new__">+ Create new...</option>
+                                </select>
+                                <div class="absolute inset-y-0 right-0 flex items-center pr-2 pointer-events-none">
+                                    <svg class="w-4 h-4 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 9l4-4 4 4m0 6l-4 4-4-4"/>
+                                    </svg>
+                                </div>
+                            </div>
+                            <button wire:click="randomCategory({{ $i }})"
+                                    class="w-8 h-8 flex items-center justify-center text-slate-500 hover:text-white hover:bg-slate-700 rounded-lg transition group relative"
+                                    aria-label="Randomize question">
+                                <span class="absolute bottom-full mb-2 left-1/2 -translate-x-1/2 px-2 py-1 text-xs bg-slate-700 text-white rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+                                    Randomize question
+                                </span>
+                                <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="3" y="3" width="18" height="18" rx="3"/>
+                                    <circle cx="8" cy="8" r="1.5" fill="currentColor"/>
+                                    <circle cx="16" cy="8" r="1.5" fill="currentColor"/>
+                                    <circle cx="8" cy="16" r="1.5" fill="currentColor"/>
+                                    <circle cx="16" cy="16" r="1.5" fill="currentColor"/>
+                                </svg>
+                            </button>
                         </div>
                     @endfor
                 </div>
@@ -527,6 +646,25 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                                        placeholder="Source: 2024 World Population Review"
                                        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
                             </div>
+
+                            <div>
+                                <label class="block text-sm font-medium text-slate-300 mb-2">Topic (optional)</label>
+                                <select wire:model.live="categoryTopicId"
+                                        class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="">No topic</option>
+                                    @foreach($topics as $topic)
+                                        <option value="{{ $topic->id }}">{{ $topic->name }}</option>
+                                    @endforeach
+                                    <option value="__new__">+ Create new topic...</option>
+                                </select>
+
+                                @if($categoryTopicId === '__new__')
+                                    <input type="text"
+                                           wire:model="newTopicName"
+                                           placeholder="New topic name"
+                                           class="w-full mt-2 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                @endif
+                            </div>
                         </div>
 
                         <!-- Bulk Paste -->
@@ -578,7 +716,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
                         <!-- Tension Answers -->
                         <div>
-                            <h4 class="text-sm font-medium text-red-400 mb-3">Tension Answers (optional, -5 pts each)</h4>
+                            <h4 class="text-sm font-medium text-red-400 mb-3">Tension Answers (min 1, -5 pts each)</h4>
                             <div class="space-y-2">
                                 @for($i = 11; $i <= 15; $i++)
                                     <div class="flex items-center gap-2">

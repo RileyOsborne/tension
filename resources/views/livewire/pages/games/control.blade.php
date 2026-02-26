@@ -3,6 +3,7 @@
 use App\Models\Game;
 use App\Models\Player;
 use App\Models\Round;
+use App\Models\Category;
 use App\Models\Answer;
 use App\Models\PlayerAnswer;
 use Livewire\Volt\Component;
@@ -390,6 +391,11 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
 
         if ($nextRoundNum > $this->game->total_rounds) {
             $this->game->update(['status' => 'completed']);
+
+            // Mark all categories used in this game as played
+            $categoryIds = $this->game->rounds()->pluck('category_id');
+            Category::whereIn('id', $categoryIds)->whereNull('played_at')->update(['played_at' => now()]);
+
             $this->broadcastState();
             return;
         }

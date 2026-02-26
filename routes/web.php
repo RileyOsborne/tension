@@ -14,7 +14,8 @@ Volt::route('/rules', 'pages.rules')->name('rules');
 // Category management
 Volt::route('/categories', 'pages.categories.index')->name('categories.index');
 Volt::route('/categories/create', 'pages.categories.create')->name('categories.create');
-Volt::route('/categories/{category}', 'pages.categories.edit')->name('categories.edit');
+Volt::route('/categories/{category}', 'pages.categories.show')->name('categories.show');
+Volt::route('/categories/{category}/edit', 'pages.categories.edit')->name('categories.edit');
 
 // Game management
 Volt::route('/games', 'pages.games.index')->name('games.index');

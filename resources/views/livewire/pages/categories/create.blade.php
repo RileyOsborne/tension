@@ -88,7 +88,9 @@ new #[Layout('components.layouts.app')] #[Title('Create Category')] class extend
             'answers.8' => 'required|string|max:255',
             'answers.9' => 'required|string|max:255',
             'answers.10' => 'required|string|max:255',
+            'answers.11' => 'required|string|max:255',
         ], [
+            'answers.11.required' => 'At least 1 tension answer is required.',
             'answers.*.required' => 'Answers 1-10 are required for the Top 10.',
         ]);
 
@@ -201,8 +203,8 @@ new #[Layout('components.layouts.app')] #[Title('Create Category')] class extend
 
             <!-- Tension Answers -->
             <div class="bg-slate-800 rounded-xl p-6 border border-red-700/50">
-                <h2 class="text-xl font-semibold mb-2 text-red-400">Tension Answers (Optional)</h2>
-                <p class="text-slate-400 text-sm mb-4">These deduct 5 points each. Add 0-5 tension answers.</p>
+                <h2 class="text-xl font-semibold mb-2 text-red-400">Tension Answers (min 1)</h2>
+                <p class="text-slate-400 text-sm mb-4">These deduct 5 points each. At least 1 required, up to 5.</p>
 
                 <div class="space-y-3">
                     @for($i = 11; $i <= 15; $i++)
