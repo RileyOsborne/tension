@@ -17,11 +17,14 @@ class PlayerAnswer extends Model
         'answer_id',
         'points_awarded',
         'was_doubled',
+        'answer_order',
+        'submission_source',
     ];
 
     protected $casts = [
         'points_awarded' => 'integer',
         'was_doubled' => 'boolean',
+        'answer_order' => 'integer',
     ];
 
     public function round(): BelongsTo

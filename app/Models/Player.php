@@ -36,8 +36,29 @@ class Player extends Model
         return $this->hasMany(PlayerAnswer::class);
     }
 
+    public function sessions(): HasMany
+    {
+        return $this->hasMany(PlayerSession::class);
+    }
+
     public function canUseDouble(): bool
     {
         return !$this->double_used;
+    }
+
+    public function isOnline(): bool
+    {
+        return $this->sessions()
+            ->where('is_connected', true)
+            ->where('last_seen_at', '>', now()->subMinutes(2))
+            ->exists();
+    }
+
+    public function activeSession(): ?PlayerSession
+    {
+        return $this->sessions()
+            ->where('is_connected', true)
+            ->latest('last_seen_at')
+            ->first();
     }
 }
