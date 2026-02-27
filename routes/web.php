@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\PlayerJoinController;
 use Illuminate\Support\Facades\Route;
 use Livewire\Volt\Volt;
 
@@ -31,3 +32,30 @@ Route::get('/games/{game}/present', function (\App\Models\Game $game) {
     $game->load(['players', 'rounds.category.answers']);
     return view('games.present', compact('game'));
 })->name('games.present');
+
+// Player device routes
+Route::get('/join', [PlayerJoinController::class, 'index'])->name('player.join');
+Route::post('/join', [PlayerJoinController::class, 'findGame'])->name('player.join.find');
+
+// Game-specific join routes with friendly 404 handling
+Route::get('/join/{game:join_code}', [PlayerJoinController::class, 'selectPlayer'])
+    ->name('player.select')
+    ->missing(fn() => redirect()->route('player.join')->withErrors(['join_code' => 'Game not found. Please check the code and try again.']));
+Route::post('/join/{game:join_code}/claim', [PlayerJoinController::class, 'claimPlayer'])
+    ->name('player.claim')
+    ->missing(fn() => redirect()->route('player.join')->withErrors(['join_code' => 'Game not found.']));
+Route::post('/join/{game:join_code}/reconnect', [PlayerJoinController::class, 'reconnectPlayer'])
+    ->name('player.reconnect')
+    ->missing(fn() => redirect()->route('player.join')->withErrors(['join_code' => 'Game not found.']));
+Route::post('/join/{game:join_code}/register', [PlayerJoinController::class, 'registerPlayer'])
+    ->name('player.register')
+    ->missing(fn() => redirect()->route('player.join')->withErrors(['join_code' => 'Game not found.']));
+
+// Player game view (Livewire)
+Volt::route('/play/{game}', 'pages.player.play')->name('player.play');
+
+// Player heartbeat (called by polling to keep session alive)
+Route::post('/api/player/heartbeat', [PlayerJoinController::class, 'heartbeat'])->name('player.heartbeat');
+
+// Player disconnect (beacon API for immediate disconnect on page close)
+Route::post('/api/player/disconnect', [PlayerJoinController::class, 'disconnect'])->name('player.disconnect');

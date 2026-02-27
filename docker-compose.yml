@@ -7,6 +7,7 @@ services:
     restart: unless-stopped
     ports:
       - "8888:80"
+      - "8989:8989"
     volumes:
       - tension-data:/var/www/html/database
     environment:
@@ -18,6 +19,19 @@ services:
       - SESSION_DRIVER=database
       - CACHE_STORE=database
       - QUEUE_CONNECTION=sync
+      - BROADCAST_CONNECTION=reverb
+      - REVERB_APP_ID=tension
+      - REVERB_APP_KEY=tension-app-key
+      - REVERB_APP_SECRET=tension-app-secret
+      - REVERB_HOST=localhost
+      - REVERB_PORT=8989
+      - REVERB_SCHEME=http
+      - REVERB_SERVER_HOST=0.0.0.0
+      - REVERB_SERVER_PORT=8989
+      - VITE_REVERB_APP_KEY=tension-app-key
+      - VITE_REVERB_HOST=localhost
+      - VITE_REVERB_PORT=8989
+      - VITE_REVERB_SCHEME=http
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost/up"]
       interval: 30s

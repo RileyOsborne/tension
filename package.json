@@ -4,7 +4,8 @@
     "type": "module",
     "scripts": {
         "build": "vite build",
-        "dev": "vite"
+        "dev": "vite",
+        "dev:network": "vite & sleep 1 && echo \"http://${VITE_HMR_HOST:-localhost}:5173\" > public/hot && wait"
     },
     "devDependencies": {
         "@tailwindcss/vite": "^4.0.0",

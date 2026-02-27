@@ -74,6 +74,6 @@ RUN touch /var/www/html/database/database.sqlite \
     && chown www-data:www-data /var/www/html/database/database.sqlite \
     && chmod 666 /var/www/html/database/database.sqlite
 
-EXPOSE 80
+EXPOSE 80 8989
 
 ENTRYPOINT ["/entrypoint.sh"]

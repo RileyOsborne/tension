@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\GameStatus;
 use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -20,6 +21,9 @@ class Game extends Model
         'join_code',
         'thinking_time',
         'join_mode',
+        'timer_running',
+        'timer_started_at',
+        'show_rules',
     ];
 
     protected $casts = [
@@ -27,6 +31,9 @@ class Game extends Model
         'total_rounds' => 'integer',
         'current_round' => 'integer',
         'thinking_time' => 'integer',
+        'timer_running' => 'boolean',
+        'timer_started_at' => 'datetime',
+        'show_rules' => 'boolean',
     ];
 
     public function players(): HasMany
@@ -58,9 +65,26 @@ class Game extends Model
         return $code;
     }
 
+    /**
+     * Resolve route model binding - case-insensitive for join_code.
+     */
+    public function resolveRouteBinding($value, $field = null)
+    {
+        if ($field === 'join_code') {
+            // Case-insensitive lookup for join_code
+            return $this->where('join_code', strtoupper($value))->first();
+        }
+
+        return parent::resolveRouteBinding($value, $field);
+    }
+
     public function getTurnOrderForRound(int $roundNumber): array
     {
-        $players = $this->players()->orderBy('position')->get();
+        // Only include non-removed players in turn order
+        $players = $this->players()
+            ->whereNull('removed_at')
+            ->orderBy('position')
+            ->get();
         $count = $players->count();
         if ($count === 0) return [];
 

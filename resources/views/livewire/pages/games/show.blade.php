@@ -6,12 +6,14 @@ use App\Models\Category;
 use App\Models\Topic;
 use App\Models\Answer;
 use App\Models\Round;
+use App\Services\GameStateMachine;
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 
 new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Component {
     public Game $game;
+    protected ?GameStateMachine $stateMachine = null;
 
     public string $newPlayerName = '';
     public string $newPlayerColor = '#3B82F6';
@@ -46,6 +48,9 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
         // Initialize empty category answers
         $this->resetCategoryForm();
+
+        // Check ready status on load (in case player count changed)
+        $this->checkReady();
     }
 
     private function fixPlayerPositions(): void
@@ -79,10 +84,24 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             ->orderBy('title')
             ->get();
 
+        // Calculate effective player count based on active players
+        $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
+        $effectivePlayerCount = $activePlayers->count();
+        $effectiveTotalRounds = $effectivePlayerCount * 2;
+
+        // Get disconnected players (self-registered but not connected, not removed)
+        // These are "orphaned" players that exist in DB but won't show in gameplay
+        $disconnectedPlayers = $this->game->players
+            ->filter(fn($p) => !$p->isRemoved() && !$p->isGmCreated() && !$p->isConnected());
+
         return [
             'categories' => $categories,
             'totalCategories' => $totalCategories,
             'topics' => Topic::orderBy('name')->get(),
+            'effectivePlayerCount' => $effectivePlayerCount,
+            'effectiveTotalRounds' => $effectiveTotalRounds,
+            'activePlayers' => $activePlayers,
+            'disconnectedPlayers' => $disconnectedPlayers,
         ];
     }
 
@@ -90,6 +109,33 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
     {
         $this->topicFilter = null;
         $this->searchQuery = '';
+    }
+
+    protected function getStateMachine(): GameStateMachine
+    {
+        if (!$this->stateMachine) {
+            $this->stateMachine = new GameStateMachine($this->game);
+        }
+        return $this->stateMachine;
+    }
+
+    public function generateJoinCode(): void
+    {
+        if (!$this->game->join_code) {
+            $this->game->update(['join_code' => Game::generateJoinCode()]);
+            $this->game->refresh();
+        }
+        $this->broadcastLobbyState();
+    }
+
+    public function broadcastLobbyState(): void
+    {
+        // Use state machine as single source of truth
+        $this->getStateMachine()->refresh();
+        $state = $this->getStateMachine()->broadcast();
+
+        // Broadcast to local presentation via BroadcastChannel
+        $this->dispatch('game-state-updated', state: $state);
     }
 
     public function openCategoryModal(): void
@@ -227,11 +273,6 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             'newPlayerColor' => 'required|string',
         ]);
 
-        if ($this->game->players()->count() >= $this->game->player_count) {
-            session()->flash('error', 'Maximum players reached.');
-            return;
-        }
-
         $nextPosition = $this->game->players()->count() + 1;
 
         Player::create([
@@ -241,9 +282,21 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             'position' => $nextPosition,
         ]);
 
+        // Always update player count and total rounds based on actual player count
+        $playerCount = $this->game->players()->count();
+        $this->game->update([
+            'player_count' => $playerCount,
+            'total_rounds' => $playerCount * 2,
+        ]);
+
         $this->newPlayerName = '';
         $this->game->refresh();
         $this->checkReady();
+
+        // Broadcast updated state to presentation
+        if ($this->game->join_code) {
+            $this->broadcastLobbyState();
+        }
     }
 
     public function removePlayer(Player $player): void
@@ -315,14 +368,33 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         }
     }
 
+    public function refreshPlayerStatus(): void
+    {
+        // Refresh player data and broadcast to presentation if join code active
+        $this->game->load('players');
+
+        if ($this->game->join_code) {
+            $this->broadcastLobbyState();
+        }
+
+        // Re-check ready status in case player count changed
+        $this->checkReady();
+    }
+
     public function checkReady(): void
     {
-        $playersReady = $this->game->players()->count() === $this->game->player_count;
-        $roundsReady = $this->game->rounds()->count() === $this->game->total_rounds;
+        // Calculate effective counts based on active players
+        $this->game->load('players');
+        $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
+        $effectivePlayerCount = $activePlayers->count();
+        $effectiveTotalRounds = $effectivePlayerCount * 2;
 
-        if ($playersReady && $roundsReady && $this->game->status === 'draft') {
+        $hasPlayers = $effectivePlayerCount > 0;
+        $roundsReady = $this->game->rounds()->count() >= $effectiveTotalRounds;
+
+        if ($hasPlayers && $roundsReady && $this->game->status === 'draft') {
             $this->game->update(['status' => 'ready']);
-        } elseif ((!$playersReady || !$roundsReady) && $this->game->status === 'ready') {
+        } elseif ((!$hasPlayers || !$roundsReady) && $this->game->status === 'ready') {
             $this->game->update(['status' => 'draft']);
         }
     }
@@ -333,13 +405,18 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             return;
         }
 
+        // Generate join code for multiplayer device support
+        $joinCode = Game::generateJoinCode();
+
         $this->game->update([
-            'status' => 'playing',
             'current_round' => 1,
+            'join_code' => $joinCode,
         ]);
 
-        // Set first round to intro
-        $this->game->rounds()->where('round_number', 1)->update(['status' => 'intro']);
+        $this->game->refresh();
+
+        // Use state machine to start the game
+        $this->getStateMachine()->startGame();
 
         $this->redirect(route('games.control', $this->game), navigate: true);
     }
@@ -378,7 +455,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
     }
 }; ?>
 
-<div>
+<div wire:poll.3s="refreshPlayerStatus">
     <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div class="mb-8">
             <a href="{{ route('games.index') }}" class="text-slate-400 hover:text-white transition">
@@ -412,9 +489,12 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
         <div class="grid lg:grid-cols-2 gap-8">
             <!-- Players Section -->
+            @php
+                $activePlayers = $game->players->filter(fn($p) => $p->isActive())->sortBy('position');
+            @endphp
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
                 <h2 class="text-xl font-semibold mb-4">
-                    Players ({{ $game->players->count() }}/{{ $game->player_count }})
+                    Players ({{ $activePlayers->count() }})
                 </h2>
 
                 <!-- Existing Players (drag to reorder) -->
@@ -433,8 +513,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                             });
                         }
                      "
-                     wire:key="player-list-{{ $game->players->pluck('id')->join('-') }}">
-                    @forelse($game->players->sortBy('position') as $player)
+                     wire:key="player-list-{{ $activePlayers->pluck('id')->join('-') }}">
+                    @forelse($activePlayers as $player)
                         <div class="flex items-center justify-between bg-slate-900 rounded-lg px-4 py-3 group"
                              data-player-id="{{ $player->id }}">
                             <div class="flex items-center gap-3">
@@ -454,37 +534,55 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                     @empty
                         <p class="text-slate-400 text-sm">No players added yet.</p>
                     @endforelse
+
+                    <!-- Disconnected Players (orphaned) -->
+                    @if($disconnectedPlayers->count() > 0)
+                        <div class="mt-4 pt-4 border-t border-slate-700">
+                            <p class="text-yellow-400 text-sm mb-2">⚠ Disconnected players (will rejoin if game starts):</p>
+                            @foreach($disconnectedPlayers as $player)
+                                <div class="flex items-center justify-between bg-slate-900/50 rounded-lg px-4 py-3 opacity-60">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-4 h-4 rounded-full" style="background-color: {{ $player->color }}"></div>
+                                        <span class="font-medium">{{ $player->name }}</span>
+                                        <span class="text-xs text-yellow-400">(disconnected)</span>
+                                    </div>
+                                    <button wire:click="removePlayer('{{ $player->id }}')"
+                                            class="text-red-400 hover:text-red-300 text-sm">
+                                        Remove
+                                    </button>
+                                </div>
+                            @endforeach
+                        </div>
+                    @endif
                 </div>
 
                 <!-- Add Player Form -->
-                @if($game->players->count() < $game->player_count)
-                    <div class="border-t border-slate-700 pt-4">
-                        <h3 class="text-sm font-medium text-slate-300 mb-3">Add Player</h3>
-                        <div class="flex gap-3 items-center">
-                            <input type="text"
-                                   wire:model="newPlayerName"
-                                   placeholder="Player name"
-                                   class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                                   wire:keydown.enter="addPlayer">
+                <div class="border-t border-slate-700 pt-4">
+                    <h3 class="text-sm font-medium text-slate-300 mb-3">Add Player</h3>
+                    <div class="flex gap-3 items-center">
+                        <input type="text"
+                               wire:model="newPlayerName"
+                               placeholder="Player name"
+                               class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                               wire:keydown.enter="addPlayer">
 
-                            <input type="color"
-                                   wire:model.live="newPlayerColor"
-                                   class="w-10 h-10 cursor-pointer rounded-full border-2 border-slate-600 bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-moz-color-swatch]:rounded-full [&::-moz-color-swatch]:border-0">
+                        <input type="color"
+                               wire:model.live="newPlayerColor"
+                               class="w-10 h-10 cursor-pointer rounded-full border-2 border-slate-600 bg-transparent p-0 [&::-webkit-color-swatch-wrapper]:p-0 [&::-webkit-color-swatch]:rounded-full [&::-webkit-color-swatch]:border-0 [&::-moz-color-swatch]:rounded-full [&::-moz-color-swatch]:border-0">
 
-                            <button wire:click="addPlayer"
-                                    class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
-                                Add
-                            </button>
-                        </div>
+                        <button wire:click="addPlayer"
+                                class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded-lg font-medium transition">
+                            Add
+                        </button>
                     </div>
-                @endif
+                </div>
             </div>
 
             <!-- Rounds Section -->
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
                 <div class="flex justify-between items-center mb-4">
                     <h2 class="text-xl font-semibold">
-                        Rounds ({{ $game->rounds->count() }}/{{ $game->total_rounds }})
+                        Rounds ({{ $game->rounds->count() }}/{{ $effectiveTotalRounds }})
                     </h2>
                     <button wire:click="openCategoryModal"
                             class="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg font-medium transition">
@@ -531,7 +629,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                 @endif
 
                 <div class="space-y-2">
-                    @for($i = 1; $i <= $game->total_rounds; $i++)
+                    @for($i = 1; $i <= $effectiveTotalRounds; $i++)
                         @php
                             $selectedCategoryId = $roundCategories[$i] ?? null;
                             $selectedCategory = $selectedCategoryId ? $categories->firstWhere('id', $selectedCategoryId) : null;
@@ -581,14 +679,26 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             </div>
         </div>
 
-        <!-- Start Game Button -->
-        <div class="mt-8 text-center">
+        <!-- Action Buttons -->
+        <div class="mt-8 text-center space-y-4">
+            <!-- Open Presentation (always available) -->
+            <div>
+                <a href="{{ route('games.present', $game) }}" target="tension-presentation"
+                   wire:click="generateJoinCode"
+                   class="inline-block bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-xl text-lg font-bold transition">
+                    Open Presentation
+                </a>
+                <p class="text-slate-500 text-sm mt-1">Shows join code & QR for players</p>
+            </div>
+
             @if($game->status === 'ready')
-                <button wire:click="startGame"
-                        class="bg-green-600 hover:bg-green-700 text-white px-12 py-4 rounded-xl text-xl font-bold transition">
-                    Start Game
-                </button>
-                <p class="text-slate-400 mt-2">All players and rounds are configured!</p>
+                <div>
+                    <button wire:click="startGame"
+                            class="bg-green-600 hover:bg-green-700 text-white px-12 py-4 rounded-xl text-xl font-bold transition">
+                        Start Game
+                    </button>
+                    <p class="text-slate-400 mt-2">All players and rounds are configured!</p>
+                </div>
             @elseif($game->status === 'playing')
                 <div class="flex justify-center gap-4">
                     <a href="{{ route('games.control', $game) }}"
@@ -602,13 +712,15 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                     </button>
                 </div>
             @else
-                <button disabled
-                        class="bg-slate-600 text-slate-400 px-12 py-4 rounded-xl text-xl font-bold cursor-not-allowed">
-                    Start Game
-                </button>
-                <p class="text-slate-400 mt-2">
-                    Add all {{ $game->player_count }} players and configure all {{ $game->total_rounds }} rounds to start.
-                </p>
+                <div>
+                    <button disabled
+                            class="bg-slate-600 text-slate-400 px-12 py-4 rounded-xl text-xl font-bold cursor-not-allowed">
+                        Start Game
+                    </button>
+                    <p class="text-slate-400 mt-2">
+                        Add players and configure {{ $effectiveTotalRounds }} rounds to start.
+                    </p>
+                </div>
             @endif
         </div>
     </div>
@@ -760,6 +872,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             </div>
         </div>
     @endif
+
 </div>
 
 <script data-navigate-once>
@@ -771,5 +884,54 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             console.log('Broadcasting reset');
             channel.postMessage({ type: 'reset' });
         });
+
+        // Listen for state updates from Livewire and forward to presentation
+        document.addEventListener('game-state-updated', function(event) {
+            var state = event.detail.state || event.detail;
+            console.log('[Setup] Broadcasting lobby state:', state);
+            channel.postMessage(state);
+        });
+
+        // Respond to state requests from presentation
+        channel.onmessage = function(event) {
+            if (event.data && event.data.type === 'request-state') {
+                console.log('[Setup] Presentation requested state');
+                var component = Livewire.all()[0];
+                if (component && component.$wire.broadcastLobbyState) {
+                    component.$wire.broadcastLobbyState();
+                }
+            }
+        };
+
+        // Listen for player joins/leaves via Laravel Echo (from remote devices)
+        if (window.Echo) {
+            window.Echo.channel('game.' + gameId)
+                .listen('.player.joined', function(e) {
+                    console.log('[Setup] Player joined via Echo:', e);
+                    // Refresh Livewire component to get updated players
+                    var component = Livewire.all()[0];
+                    if (component && component.$wire) {
+                        component.$wire.$refresh().then(function() {
+                            // After refresh, broadcast updated state to presentation
+                            if (component.$wire.broadcastLobbyState) {
+                                component.$wire.broadcastLobbyState();
+                            }
+                        });
+                    }
+                })
+                .listen('.player.left', function(e) {
+                    console.log('[Setup] Player left via Echo:', e);
+                    // Refresh Livewire component to get updated players
+                    var component = Livewire.all()[0];
+                    if (component && component.$wire) {
+                        component.$wire.$refresh().then(function() {
+                            // After refresh, broadcast updated state to presentation
+                            if (component.$wire.broadcastLobbyState) {
+                                component.$wire.broadcastLobbyState();
+                            }
+                        });
+                    }
+                });
+        }
     });
 </script>
