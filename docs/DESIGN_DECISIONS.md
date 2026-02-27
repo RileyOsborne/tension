@@ -1,0 +1,192 @@
+# Design Decisions
+
+This document explains the reasoning behind key architectural and implementation choices in Friction.
+
+## Two-Tab Architecture
+
+### Decision
+The GM runs two separate browser tabs: Control and Presentation.
+
+### Why Not Single Page?
+- **Information separation**: GM needs to see all answers; players should only see revealed answers
+- **Input hiding**: GM enters player answers without showing keyboard/autocomplete to audience
+- **Dramatic control**: GM controls exact timing of reveals for suspense
+- **Focus management**: Control tab can have forms/inputs without affecting display
+
+### Why BroadcastChannel?
+- **Zero latency**: Instant communication between tabs
+- **No network**: Works offline, no server round-trip
+- **Simple**: No additional infrastructure needed
+- **Reliable**: Browser-native API, no connection management
+
+### Trade-offs
+- GM must be physically present (local machine)
+- Cannot have remote GM (would need WebSocket fallback)
+
+## Centralized GameStateMachine
+
+### Decision
+All game state changes flow through a single `GameStateMachine` service.
+
+### Why?
+- **Single source of truth**: Prevents inconsistent state across views
+- **Validation**: One place to enforce transition rules
+- **Broadcasting**: All state changes automatically broadcast
+- **Testability**: Easy to test state transitions in isolation
+- **Audit trail**: Single point for logging/debugging
+
+### Alternative Considered
+Direct model updates from controllers - rejected because:
+- Risk of inconsistent state
+- Duplicate broadcasting logic
+- No transition validation
+
+## Player Session with Heartbeats
+
+### Decision
+Track player connections via session tokens and periodic heartbeats.
+
+### Why Not WebSocket Connection State?
+- **Reliability**: Network connections drop unexpectedly
+- **Graceful degradation**: Game continues if player loses connection
+- **Reconnection**: Player can rejoin from different device/tab
+- **GM takeover**: Disconnected players don't block gameplay
+
+### Heartbeat Interval (5s) and Timeout (15s)
+- **5s interval**: Frequent enough to detect disconnects quickly
+- **15s timeout**: 3x interval allows for network hiccups
+- **Balance**: Quick detection vs. unnecessary disconnects
+
+## Position-Based Scoring
+
+### Decision
+Points equal position number for #1-10, fixed penalty for #11+.
+
+### Why?
+- **Original format**: Based on the TV show's scoring system
+- **Risk/reward**: Higher positions are harder to guess but worth more
+- **Drama**: Creates friction when approaching #10
+- **Simplicity**: Easy for players to understand
+
+### Why Fixed Friction Penalty (-5)?
+- **Dramatic cliff**: Clear boundary at #10
+- **Risk deterrent**: Discourages wild guesses
+- **Simplicity**: One penalty value to remember
+
+## Turn Order Rotation
+
+### Decision
+First player rotates each round.
+
+### Why?
+- **Fairness**: First player has time pressure (countdown)
+- **Balance**: Each player goes first equally over the game
+- **Strategy**: Later players can react to earlier answers
+- **Formula**: Simple `(round - 1) % playerCount` offset
+
+## Fuzzy Answer Matching
+
+### Decision
+Use multi-strategy fuzzy matching instead of exact match only.
+
+### Why?
+- **User experience**: Players shouldn't be penalized for "The Beatles" vs "Beatles"
+- **Typo tolerance**: Minor spelling errors shouldn't cost points
+- **Speed**: GM doesn't need to correct every variation
+
+### Why Not More Aggressive Fuzzy Matching?
+- **False positives**: Don't want "Paris" matching "Paradise"
+- **GM control**: GM can always override matches
+- **Balance**: Reward players who know exact answers
+
+## ULIDs Instead of Auto-Increment IDs
+
+### Decision
+Use ULIDs (Universally Unique Lexicographically Sortable Identifiers) for all models.
+
+### Why?
+- **No enumeration**: Can't guess other game/player IDs
+- **Sortable**: Natural ordering by creation time
+- **Distributed-ready**: No conflicts in multi-server setup
+- **URL-safe**: Can be used in routes without encoding
+
+## SQLite Database
+
+### Decision
+Use SQLite for data storage.
+
+### Why?
+- **Simplicity**: No separate database server
+- **Portability**: Single file, easy backup/restore
+- **Performance**: More than sufficient for single-machine use
+- **Development**: Same database in dev and production
+
+### When to Migrate to PostgreSQL/MySQL?
+- Multi-server deployment
+- High concurrent write load
+- Need for advanced SQL features
+
+## GM-Created vs Self-Registered Players
+
+### Decision
+Support both GM-created player slots and self-registration.
+
+### Why Both?
+- **Flexibility**: GM can pre-create players or let them join
+- **Claiming**: Players can claim GM-created slots
+- **Hybrid**: Mix of both in same game
+
+### Why GM-Created "Always Connected"?
+- **Simplicity**: No session tracking needed
+- **GM control**: GM manually enters their answers anyway
+- **No confusion**: GM always knows they're controlling these players
+
+## Current Assumptions
+
+These assumptions may need revisiting for future features:
+
+### GM Always Local
+- Two-tab architecture assumes same machine
+- BroadcastChannel only works locally
+
+### Single Active Game
+- No support for GM running multiple simultaneous games
+- Would need GM authentication and game switching
+
+### In-Person Play
+- Designed for everyone in same room
+- Remote play would need different reveal timing
+
+## Future Considerations
+
+### Remote GM Play
+Would require:
+- Move presentation state to WebSockets
+- Add GM authentication
+- Handle network latency for reveals
+- Consider offline fallback
+
+### Spectator Mode
+Would need:
+- Read-only view type
+- Filter unrevealed answers from state
+- Separate spectator count tracking
+
+### Team Play
+Would require:
+- Team model with player relationships
+- Team-based turn order
+- Combined team scoring
+- Team answer submission (one per team)
+
+### Category Packs / Themes
+Would benefit from:
+- Pack/theme grouping for categories
+- Difficulty ratings
+- Topic tagging
+
+### Scoring Variants
+Could support:
+- Alternative scoring formulas
+- Bonus rounds
+- Time-based multipliers

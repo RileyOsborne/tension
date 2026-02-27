@@ -51,7 +51,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
                 ->when($this->topicFilter, fn($q) => $q->where('topic_id', $this->topicFilter))
                 ->withCount([
                     'answers as base_count' => fn($q) => $q->where('position', '<=', 10),
-                    'answers as tension_count' => fn($q) => $q->where('position', '>', 10),
+                    'answers as friction_count' => fn($q) => $q->where('position', '>', 10),
                 ])
                 ->when($this->sortBy === 'topic', function($q) {
                     $q->orderBy(
@@ -335,7 +335,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
                                         </button>
                                     </th>
                                     <th class="px-4 py-3 font-medium text-center w-[10%]">Base</th>
-                                    <th class="px-4 py-3 font-medium text-center w-[10%]">Tension</th>
+                                    <th class="px-4 py-3 font-medium text-center w-[10%]">Friction</th>
                                     <th class="px-4 py-3 font-medium text-center w-[10%]">
                                         <button wire:click="sort('played_at')" class="flex items-center gap-1 hover:text-white transition mx-auto">
                                             Played
@@ -370,8 +370,8 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
                                             </span>
                                         </td>
                                         <td class="px-4 py-3 text-center">
-                                            <span class="text-sm {{ $category->tension_count >= 1 ? 'text-red-400' : 'text-yellow-400' }}">
-                                                {{ $category->tension_count }}/5
+                                            <span class="text-sm {{ $category->friction_count >= 1 ? 'text-red-400' : 'text-yellow-400' }}">
+                                                {{ $category->friction_count }}/5
                                             </span>
                                         </td>
                                         <td class="px-4 py-3 text-center" wire:click.stop>

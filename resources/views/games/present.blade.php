@@ -3,34 +3,34 @@
         <!-- Rules Slide -->
         <div id="slide-rules" class="hidden w-full max-w-5xl mx-auto px-8">
             <div class="animate-fade-in">
-                <h1 class="text-5xl font-bold mb-8 text-center">How to Play <span class="text-red-500">TENSION TRIVIA</span></h1>
+                <h1 class="text-5xl font-bold mb-8 text-center">How to Play <span class="text-white">FRIC</span><span class="text-red-500">TION</span></h1>
 
                 <!-- The Goal -->
                 <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 mb-8">
                     <h2 class="text-2xl font-semibold mb-4">The Goal</h2>
                     <p class="text-slate-300 text-xl">
-                        Players try to name items from a <strong>Top 10</strong> list. The twist? You want to name items
-                        <strong class="text-green-400">closer to #10</strong> than #1, because higher positions score more points!
+                        Players try to name items from a <strong>Top {{ $game->top_answers_count }}</strong> list. The twist? You want to name items
+                        <strong class="text-green-400">closer to #{{ $game->top_answers_count }}</strong> than #1, because higher positions score more points!
                     </p>
                 </div>
 
                 <!-- Scoring Rules -->
                 <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 mb-8">
                     <h2 class="text-2xl font-semibold mb-4">Scoring</h2>
-                    <x-rules-display />
+                    <x-rules-display :game="$game" />
                 </div>
 
                 <!-- Example -->
                 <div class="bg-slate-800 rounded-xl p-6 border border-blue-700/50">
                     <h2 class="text-2xl font-semibold mb-4 text-blue-400">Example Round</h2>
                     <p class="text-slate-300 text-lg mb-4">
-                        <strong>Category:</strong> "Top 10 Countries by Aerospace Parts Development"
+                        <strong>Category:</strong> "Top {{ $game->top_answers_count }} Countries by Aerospace Parts Development"
                     </p>
                     <div class="space-y-2 text-slate-400 text-lg">
                         <p>Player A guesses "United States" &rarr; #1 = <span class="text-green-400">+1 point</span></p>
                         <p>Player B guesses "France" &rarr; #5 = <span class="text-green-400">+5 points</span></p>
-                        <p>Player C guesses "South Korea" &rarr; #10 = <span class="text-green-400">+10 points!</span></p>
-                        <p>Player D guesses "Brazil" &rarr; #12 (Tension!) = <span class="text-red-400">-5 points</span></p>
+                        <p>Player C guesses "South Korea" &rarr; #{{ $game->top_answers_count }} = <span class="text-green-400">+{{ $game->top_answers_count }} points!</span></p>
+                        <p>Player D guesses "Brazil" &rarr; #{{ $game->top_answers_count + 2 }} (Friction!) = <span class="text-red-400">{{ $game->friction_penalty }} points</span></p>
                     </div>
                 </div>
             </div>
@@ -115,10 +115,10 @@
                     <!-- Populated by JS -->
                 </div>
 
-                <!-- Tension Zone -->
-                <div id="tension-zone" class="hidden">
-                    <h3 class="text-2xl font-bold text-red-500 text-center mb-4">TENSION ZONE</h3>
-                    <div id="reveal-tension" class="grid grid-cols-5 gap-4">
+                <!-- Friction Zone -->
+                <div id="friction-zone" class="hidden">
+                    <h3 class="text-2xl font-bold text-red-500 text-center mb-4">FRICTION ZONE</h3>
+                    <div id="reveal-friction" class="grid grid-cols-5 gap-4">
                         <!-- Populated by JS -->
                     </div>
                 </div>
@@ -151,7 +151,7 @@
                 <!-- Title -->
                 <div class="text-center mb-8">
                     <h1 class="text-6xl font-black mb-2">
-                        <span class="text-white">TEN</span><span class="text-red-500">SION</span>
+                        <span class="text-white">FRIC</span><span class="text-red-500">TION</span>
                     </h1>
                     <p class="text-2xl text-slate-400">Join the game!</p>
                 </div>
@@ -247,7 +247,7 @@
                     'text' => $a->display_text, // Use display_text to hide geographic identifiers
                     'stat' => $a->stat,
                     'points' => $a->points,
-                    'is_tension' => $a->is_tension,
+                    'is_friction' => $a->is_friction,
                 ])->values()->toArray(),
             ];
         }
@@ -287,10 +287,19 @@
                     'color' => $p->color,
                     'total_score' => $p->total_score,
                     'double_used' => $p->double_used,
+                    'doubles_remaining' => $p->doublesRemaining(),
                     'is_connected' => $p->isConnected(),
                     'is_gm_created' => $p->isGmCreated(),
                     'is_gm_controlled' => $p->isGmControlled(),
                 ])->values()->toArray(),
+            'config' => [
+                'topAnswersCount' => $game->top_answers_count,
+                'frictionPenalty' => $game->friction_penalty,
+                'notOnListPenalty' => $game->not_on_list_penalty,
+                'doubleMultiplier' => $game->double_multiplier,
+                'doublesPerPlayer' => $game->doubles_per_player,
+                'maxAnswersPerCategory' => $game->max_answers_per_category,
+            ],
         ];
     @endphp
 
@@ -302,7 +311,7 @@
         const players = @json($game->players->keyBy('id'));
 
         // Initialize BroadcastChannel
-        const channel = new BroadcastChannel('tension-game-' + gameId);
+        const channel = new BroadcastChannel('friction-game-' + gameId);
 
         // DOM elements
         const slides = {
@@ -551,6 +560,16 @@
             container.innerHTML = html;
         }
 
+        // Store current config (updated from state)
+        var currentConfig = initialState.config || {
+            topAnswersCount: 10,
+            frictionPenalty: -5,
+            notOnListPenalty: -3,
+            doubleMultiplier: 2,
+            doublesPerPlayer: 1,
+            maxAnswersPerCategory: 15
+        };
+
         function renderRevealGrid(category, revealedAnswers, currentSlide) {
             // Build a map of revealed answers with their players
             var revealedMap = {};
@@ -558,9 +577,13 @@
                 revealedMap[ra.position] = ra;
             });
 
-            // Render top 10
+            var topCount = currentConfig.topAnswersCount;
+            var maxAnswers = currentConfig.maxAnswersPerCategory;
+            var doubleMultiplier = currentConfig.doubleMultiplier;
+
+            // Render top answers (1 to topAnswersCount)
             var top10Html = '';
-            for (var i = 1; i <= 10; i++) {
+            for (var i = 1; i <= topCount; i++) {
                 var answer = category.answers.find(function(a) { return a.position === i; });
                 var revealed = revealedMap[i];
                 var isRevealed = i <= currentSlide;
@@ -570,7 +593,7 @@
                     if (isRevealed && revealed && revealed.players && revealed.players.length > 0) {
                         playersHtml = '<div class="mt-2 flex flex-wrap gap-1 justify-center">';
                         revealed.players.forEach(function(p) {
-                            playersHtml += '<span class="text-xs px-2 py-0.5 rounded-full" style="background-color: ' + p.color + '40; color: ' + p.color + '">' + p.name + (p.doubled ? ' 2x' : '') + '</span>';
+                            playersHtml += '<span class="text-xs px-2 py-0.5 rounded-full" style="background-color: ' + p.color + '40; color: ' + p.color + '">' + p.name + (p.doubled ? ' ' + doubleMultiplier + 'x' : '') + '</span>';
                         });
                         playersHtml += '</div>';
                     }
@@ -592,14 +615,14 @@
             }
             document.getElementById('reveal-top10').innerHTML = top10Html;
 
-            // Render tension zone if there are tension answers
-            var hasTension = category.answers.some(function(a) { return a.position > 10; });
-            var tensionZone = document.getElementById('tension-zone');
+            // Render friction zone if there are friction answers (position > topAnswersCount)
+            var hasFriction = category.answers.some(function(a) { return a.position > topCount; });
+            var frictionZone = document.getElementById('friction-zone');
 
-            if (hasTension) {
-                tensionZone.classList.remove('hidden');
-                var tensionHtml = '';
-                for (var i = 11; i <= 15; i++) {
+            if (hasFriction) {
+                frictionZone.classList.remove('hidden');
+                var frictionHtml = '';
+                for (var i = topCount + 1; i <= maxAnswers; i++) {
                     var answer = category.answers.find(function(a) { return a.position === i; });
                     var revealed = revealedMap[i];
                     var isRevealed = i <= currentSlide;
@@ -609,29 +632,29 @@
                         if (isRevealed && revealed && revealed.players && revealed.players.length > 0) {
                             playersHtml = '<div class="mt-2 flex flex-wrap gap-1 justify-center">';
                             revealed.players.forEach(function(p) {
-                                playersHtml += '<span class="text-xs px-2 py-0.5 rounded-full" style="background-color: ' + p.color + '40; color: ' + p.color + '">' + p.name + (p.doubled ? ' 2x' : '') + '</span>';
+                                playersHtml += '<span class="text-xs px-2 py-0.5 rounded-full" style="background-color: ' + p.color + '40; color: ' + p.color + '">' + p.name + (p.doubled ? ' ' + doubleMultiplier + 'x' : '') + '</span>';
                             });
                             playersHtml += '</div>';
                         }
 
-                        tensionHtml += '<div class="bg-red-900/50 border border-red-500/50 rounded-xl p-4 text-center ' + (isRevealed ? '' : 'opacity-30') + '">';
-                        tensionHtml += '<div class="text-red-400 font-bold text-lg">#' + i + '</div>';
+                        frictionHtml += '<div class="bg-red-900/50 border border-red-500/50 rounded-xl p-4 text-center ' + (isRevealed ? '' : 'opacity-30') + '">';
+                        frictionHtml += '<div class="text-red-400 font-bold text-lg">#' + i + '</div>';
                         if (isRevealed) {
-                            tensionHtml += '<div class="text-xl font-bold mt-1">' + answer.text + '</div>';
+                            frictionHtml += '<div class="text-xl font-bold mt-1">' + answer.text + '</div>';
                             if (answer.stat) {
-                                tensionHtml += '<div class="text-sm text-slate-400">' + answer.stat + '</div>';
+                                frictionHtml += '<div class="text-sm text-slate-400">' + answer.stat + '</div>';
                             }
-                            tensionHtml += '<div class="text-red-400 font-bold mt-1">' + answer.points + '</div>';
+                            frictionHtml += '<div class="text-red-400 font-bold mt-1">' + answer.points + '</div>';
                         } else {
-                            tensionHtml += '<div class="text-3xl font-bold mt-2 text-slate-500">?</div>';
+                            frictionHtml += '<div class="text-3xl font-bold mt-2 text-slate-500">?</div>';
                         }
-                        tensionHtml += playersHtml;
-                        tensionHtml += '</div>';
+                        frictionHtml += playersHtml;
+                        frictionHtml += '</div>';
                     }
                 }
-                document.getElementById('reveal-tension').innerHTML = tensionHtml;
+                document.getElementById('reveal-friction').innerHTML = frictionHtml;
             } else {
-                tensionZone.classList.add('hidden');
+                frictionZone.classList.add('hidden');
             }
         }
 
@@ -700,6 +723,11 @@
         function handleStateUpdate(state) {
             console.log('=== STATE UPDATE ===', state);
 
+            // Update config from state if provided
+            if (state.config) {
+                currentConfig = state.config;
+            }
+
             // Handle game not started yet (draft or ready status) - show lobby
             if (state.gameStatus === 'draft' || state.gameStatus === 'ready') {
                 renderLobbyPlayers(state.players, state.playerCount || 4);
@@ -763,7 +791,7 @@
                     break;
 
                 case 'revealing':
-                case 'tension':
+                case 'friction':
                     document.getElementById('reveal-round').textContent = state.currentRound;
                     document.getElementById('reveal-category').textContent = category.title;
                     renderRevealGrid(category, state.revealedAnswers || [], state.currentSlide);

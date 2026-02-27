@@ -10,7 +10,7 @@ new #[Layout('components.layouts.app')] #[Title('Rules')] class extends Componen
 
 <div>
     <div class="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <h1 class="text-4xl font-bold mb-8 text-center">How to Play <span class="text-red-500">TENSION TRIVIA</span></h1>
+        <h1 class="text-4xl font-bold mb-8 text-center">How to Play <span class="text-white">FRIC</span><span class="text-red-500">TION</span></h1>
 
         <!-- The Goal -->
         <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 mb-8">
@@ -37,7 +37,7 @@ new #[Layout('components.layouts.app')] #[Title('Rules')] class extends Componen
                 <p>Player A guesses "United States" &rarr; #1 = <span class="text-green-400">+1 point</span></p>
                 <p>Player B guesses "France" &rarr; #5 = <span class="text-green-400">+5 points</span></p>
                 <p>Player C guesses "South Korea" &rarr; #10 = <span class="text-green-400">+10 points!</span></p>
-                <p>Player D guesses "Brazil" &rarr; #12 (Tension!) = <span class="text-red-400">-5 points</span></p>
+                <p>Player D guesses "Brazil" &rarr; #12 (Friction!) = <span class="text-red-400">-5 points</span></p>
             </div>
         </div>
 

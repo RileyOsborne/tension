@@ -37,12 +37,12 @@ class Category extends Model
 
     public function topTenAnswers(): HasMany
     {
-        return $this->answers()->where('is_tension', false);
+        return $this->answers()->where('is_friction', false);
     }
 
-    public function tensionAnswers(): HasMany
+    public function frictionAnswers(): HasMany
     {
-        return $this->answers()->where('is_tension', true);
+        return $this->answers()->where('is_friction', true);
     }
 
     public function rounds(): HasMany
@@ -50,14 +50,18 @@ class Category extends Model
         return $this->hasMany(Round::class);
     }
 
-    public function isComplete(): bool
+    /**
+     * Check if category has enough answers to be used.
+     *
+     * @param int $minAnswers Minimum required answers (defaults to 10)
+     */
+    public function isComplete(int $minAnswers = 10): bool
     {
-        // A category is complete if it has at least 10 answers (the top 10)
-        return $this->answers()->count() >= 10;
+        return $this->answers()->count() >= $minAnswers;
     }
 
-    public function tensionCount(): int
+    public function frictionCount(): int
     {
-        return $this->tensionAnswers()->count();
+        return $this->frictionAnswers()->count();
     }
 }

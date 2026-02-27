@@ -87,7 +87,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         // Calculate effective player count based on active players
         $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
         $effectivePlayerCount = $activePlayers->count();
-        $effectiveTotalRounds = $effectivePlayerCount * 2;
+        $effectiveTotalRounds = $effectivePlayerCount * ($this->game->rounds_per_player ?? 2);
 
         // Get disconnected players (self-registered but not connected, not removed)
         // These are "orphaned" players that exist in DB but won't show in gameplay
@@ -232,7 +232,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             'categoryAnswers.10' => 'required|string|max:255',
             'categoryAnswers.11' => 'required|string|max:255',
         ], [
-            'categoryAnswers.11.required' => 'At least 1 tension answer is required.',
+            'categoryAnswers.11.required' => 'At least 1 friction answer is required.',
             'categoryAnswers.*.required' => 'Answers 1-10 are required.',
         ]);
 
@@ -282,12 +282,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             'position' => $nextPosition,
         ]);
 
-        // Always update player count and total rounds based on actual player count
-        $playerCount = $this->game->players()->count();
-        $this->game->update([
-            'player_count' => $playerCount,
-            'total_rounds' => $playerCount * 2,
-        ]);
+        // Recalculate player count and total rounds
+        $this->game->recalculateFromPlayers();
 
         $this->newPlayerName = '';
         $this->game->refresh();
@@ -309,8 +305,15 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
             $p->update(['position' => $index + 1]);
         });
 
+        // Recalculate player count and total rounds
+        $this->game->recalculateFromPlayers();
         $this->game->refresh();
         $this->checkReady();
+
+        // Broadcast updated state to presentation
+        if ($this->game->join_code) {
+            $this->broadcastLobbyState();
+        }
     }
 
     public function reorderPlayers(array $orderedIds): void
@@ -387,7 +390,13 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         $this->game->load('players');
         $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
         $effectivePlayerCount = $activePlayers->count();
-        $effectiveTotalRounds = $effectivePlayerCount * 2;
+        $effectiveTotalRounds = $effectivePlayerCount * ($this->game->rounds_per_player ?? 2);
+
+        // Update game's stored player_count to match active players
+        if ($this->game->player_count !== $effectivePlayerCount) {
+            $this->game->recalculateFromPlayers();
+            $this->game->refresh();
+        }
 
         $hasPlayers = $effectivePlayerCount > 0;
         $roundsReady = $this->game->rounds()->count() >= $effectiveTotalRounds;
@@ -683,7 +692,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         <div class="mt-8 text-center space-y-4">
             <!-- Open Presentation (always available) -->
             <div>
-                <a href="{{ route('games.present', $game) }}" target="tension-presentation"
+                <a href="{{ route('games.present', $game) }}" target="friction-presentation"
                    wire:click="generateJoinCode"
                    class="inline-block bg-purple-600 hover:bg-purple-700 text-white px-8 py-3 rounded-xl text-lg font-bold transition">
                     Open Presentation
@@ -826,16 +835,16 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                             @error('categoryAnswers.*') <span class="text-red-400 text-sm block mt-2">{{ $message }}</span> @enderror
                         </div>
 
-                        <!-- Tension Answers -->
+                        <!-- Friction Answers -->
                         <div>
-                            <h4 class="text-sm font-medium text-red-400 mb-3">Tension Answers (min 1, -5 pts each)</h4>
+                            <h4 class="text-sm font-medium text-red-400 mb-3">Friction Answers (min 1, -5 pts each)</h4>
                             <div class="space-y-2">
                                 @for($i = 11; $i <= 15; $i++)
                                     <div class="flex items-center gap-2">
                                         <span class="w-6 text-right text-sm text-red-400 font-medium">{{ $i }}.</span>
                                         <input type="text"
                                                wire:model="categoryAnswers.{{ $i }}"
-                                               placeholder="Tension {{ $i - 10 }}"
+                                               placeholder="Friction {{ $i - 10 }}"
                                                class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500">
                                         <input type="text"
                                                wire:model="categoryAnswerStats.{{ $i }}"
@@ -878,7 +887,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 <script data-navigate-once>
     document.addEventListener('livewire:initialized', function() {
         var gameId = '{{ $game->id }}';
-        var channel = new BroadcastChannel('tension-game-' + gameId);
+        var channel = new BroadcastChannel('friction-game-' + gameId);
 
         Livewire.on('game-reset', function(params) {
             console.log('Broadcasting reset');

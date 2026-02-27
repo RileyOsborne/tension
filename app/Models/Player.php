@@ -44,9 +44,31 @@ class Player extends Model
         return $this->hasMany(PlayerSession::class);
     }
 
+    /**
+     * Check if player can use their double.
+     * Counts doubles already used against the game's doubles_per_player limit.
+     */
     public function canUseDouble(): bool
     {
-        return !$this->double_used;
+        $doublesUsed = $this->playerAnswers()
+            ->whereHas('round', fn($q) => $q->where('game_id', $this->game_id))
+            ->where('was_doubled', true)
+            ->count();
+
+        return $doublesUsed < $this->game->doubles_per_player;
+    }
+
+    /**
+     * Get the number of doubles remaining for this player.
+     */
+    public function doublesRemaining(): int
+    {
+        $doublesUsed = $this->playerAnswers()
+            ->whereHas('round', fn($q) => $q->where('game_id', $this->game_id))
+            ->where('was_doubled', true)
+            ->count();
+
+        return max(0, $this->game->doubles_per_player - $doublesUsed);
     }
 
     /**

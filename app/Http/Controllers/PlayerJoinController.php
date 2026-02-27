@@ -201,8 +201,8 @@ class PlayerJoinController extends Controller
             $session = PlayerSession::where('session_token', $token)->first();
 
             if ($session) {
-                // Mark as disconnected
-                $session->update(['last_seen_at' => now()->subMinutes(5)]);
+                // Mark as disconnected using the same timeout as PlayerConnectionService
+                $session->update(['last_seen_at' => now()->subSeconds(PlayerConnectionService::TIMEOUT_SECONDS)]);
 
                 // Broadcast disconnect for immediate UI update
                 $player = $session->player;

@@ -112,7 +112,7 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
             'answers.10' => 'required|string|max:255',
             'answers.11' => 'required|string|max:255',
         ], [
-            'answers.11.required' => 'At least 1 tension answer is required.',
+            'answers.11.required' => 'At least 1 friction answer is required.',
             'answers.*.required' => 'Answers 1-10 are required for the Top 10.',
         ]);
 
@@ -254,9 +254,9 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
                 </div>
             </div>
 
-            <!-- Tension Answers -->
+            <!-- Friction Answers -->
             <div class="bg-slate-800 rounded-xl p-6 border border-red-700/50">
-                <h2 class="text-xl font-semibold mb-2 text-red-400">Tension Answers (min 1)</h2>
+                <h2 class="text-xl font-semibold mb-2 text-red-400">Friction Answers (min 1)</h2>
                 <p class="text-slate-400 text-sm mb-4">These deduct 5 points each. At least 1 required, up to 5.</p>
 
                 <div class="space-y-3">
@@ -265,7 +265,7 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
                             <span class="w-8 text-right font-bold text-red-400">#{{ $i }}</span>
                             <input type="text"
                                    wire:model="answers.{{ $i }}"
-                                   placeholder="Tension {{ $i - 10 }} (optional)"
+                                   placeholder="Friction {{ $i - 10 }} (optional)"
                                    class="flex-1 bg-slate-900 border border-slate-600 rounded-lg px-4 py-2 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500">
                             <input type="text"
                                    wire:model="answerStats.{{ $i }}"

@@ -35,6 +35,9 @@ new #[Layout('components.layouts.app')] class extends Component {
     public ?string $timerMode = null; // 'countdown' or 'countup'
     public bool $allAnswered = false;
 
+    // Track if we were ever in an active game (to detect resets)
+    public bool $wasInActiveGame = false;
+
     public function mount(Game $game): void
     {
         $this->game = $game;
@@ -52,10 +55,17 @@ new #[Layout('components.layouts.app')] class extends Component {
             return;
         }
 
-        // Send initial heartbeat
-        app(PlayerConnectionService::class)->heartbeat($this->sessionToken);
+        // Send initial heartbeat (only if not removed)
+        if (!$this->player->isRemoved()) {
+            app(PlayerConnectionService::class)->heartbeat($this->sessionToken);
+        }
 
         $this->loadCurrentState();
+
+        // Check if the game was ever active (has rounds with answers or current_round > 0)
+        $hasPlayedBefore = $this->game->current_round > 0 ||
+            $this->game->rounds()->whereHas('playerAnswers')->exists();
+        $this->wasInActiveGame = $hasPlayedBefore;
     }
 
     #[On('echo:game.{game.id},state.updated')]
@@ -77,6 +87,11 @@ new #[Layout('components.layouts.app')] class extends Component {
         $this->timerMode = $data['timerMode'] ?? null;
         $this->allAnswered = $data['allAnswered'] ?? false;
 
+        // Track if we've ever been in an active game
+        if ($this->gameStatus === 'playing') {
+            $this->wasInActiveGame = true;
+        }
+
         // Refresh game and player data to get latest scores and round info
         $this->game->refresh();
         $this->player->refresh();
@@ -88,6 +103,7 @@ new #[Layout('components.layouts.app')] class extends Component {
     public function loadCurrentState(): void
     {
         $this->game->refresh();
+        $this->player->refresh();
 
         // Initialize state from database
         $this->gameStatus = $this->game->status;
@@ -97,13 +113,20 @@ new #[Layout('components.layouts.app')] class extends Component {
         $this->timerStartedAt = $this->game->timer_started_at?->timestamp;
         $this->thinkingTime = $this->game->thinking_time;
 
+        // Track if we've ever been in an active game
+        if ($this->gameStatus === 'playing') {
+            $this->wasInActiveGame = true;
+        }
+
         $currentRound = $this->game->currentRoundModel();
         if ($currentRound) {
             $this->roundStatus = $currentRound->status;
         }
 
-        $this->checkSubmissionState();
-        $this->player->refresh();
+        // Only check submission state if player is active
+        if (!$this->player->isRemoved()) {
+            $this->checkSubmissionState();
+        }
     }
 
     private function checkSubmissionState(): void
@@ -181,7 +204,9 @@ new #[Layout('components.layouts.app')] class extends Component {
 }; ?>
 
 <div class="min-h-screen bg-slate-900 text-white"
+     @if(!$player->isRemoved())
      wire:poll.2s="loadCurrentState"
+     @endif
      x-data="{
         timerRunning: @entangle('timerRunning'),
         timerStartedAt: @entangle('timerStartedAt'),
@@ -193,12 +218,16 @@ new #[Layout('components.layouts.app')] class extends Component {
         heartbeatInterval: null,
         timerInterval: null,
         playerId: '{{ $player->id }}',
+        isRemoved: {{ $player->isRemoved() ? 'true' : 'false' }},
 
         get isMyTurn() {
             return this.currentTurnPlayerId === this.playerId;
         },
 
         init() {
+            // Don't run heartbeats if player is removed
+            if (this.isRemoved) return;
+
             const sessionToken = '{{ $sessionToken }}';
 
             // Heartbeat function - keeps player connected
@@ -310,11 +339,53 @@ new #[Layout('components.layouts.app')] class extends Component {
     </header>
 
     <main class="p-4 max-w-lg mx-auto">
-        @if($gameStatus === 'draft' || $gameStatus === 'ready')
+        @if($player->isRemoved())
+            <!-- Player was removed from the game -->
+            <div class="text-center py-12">
+                <div class="w-20 h-20 mx-auto mb-6 rounded-full bg-red-900/30 flex items-center justify-center">
+                    <svg class="w-10 h-10 text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                    </svg>
+                </div>
+
+                <h2 class="text-2xl font-bold mb-2 text-red-400">You've Been Removed</h2>
+                <p class="text-slate-400 mb-8">The Game Master removed you from this game.</p>
+
+                <a href="{{ route('player.join') }}"
+                   class="inline-block px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg font-semibold transition">
+                    Join Another Game
+                </a>
+            </div>
+
+        @elseif(($gameStatus === 'draft' || $gameStatus === 'ready') && $wasInActiveGame)
+            <!-- Game was reset or ended early -->
+            <div class="text-center py-12">
+                <div class="w-20 h-20 mx-auto mb-6 rounded-full bg-yellow-900/30 flex items-center justify-center">
+                    <svg class="w-10 h-10 text-yellow-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+                    </svg>
+                </div>
+
+                <h2 class="text-2xl font-bold mb-2">Game Has Ended</h2>
+                <p class="text-slate-400 mb-8">The Game Master has ended or reset this game.</p>
+
+                <div class="space-y-3">
+                    <a href="{{ route('player.join') }}"
+                       class="block px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition">
+                        Join Another Game
+                    </a>
+                    <button wire:click="$refresh"
+                            class="block w-full px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg font-semibold transition">
+                        Check If Game Restarted
+                    </button>
+                </div>
+            </div>
+
+        @elseif($gameStatus === 'draft' || $gameStatus === 'ready')
             <!-- Lobby - Waiting for game to start -->
             <div class="text-center py-12">
                 <h1 class="text-4xl font-black mb-2">
-                    <span class="text-white">TEN</span><span class="text-red-500">SION</span>
+                    <span class="text-white">FRIC</span><span class="text-red-500">TION</span>
                 </h1>
                 <p class="text-slate-400 mb-8">You're in!</p>
 
@@ -346,7 +417,7 @@ new #[Layout('components.layouts.app')] class extends Component {
             @if($showRules)
                 <!-- Rules display -->
                 <div class="py-6">
-                    <h1 class="text-2xl font-bold mb-6 text-center">How to Play <span class="text-red-500">TENSION</span></h1>
+                    <h1 class="text-2xl font-bold mb-6 text-center">How to Play <span class="text-white">TEN</span><span class="text-red-500">SION</span></h1>
 
                     <div class="space-y-4 text-sm">
                         <div class="bg-slate-800 rounded-xl p-4">
@@ -358,7 +429,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                             <h3 class="font-semibold mb-2">Scoring</h3>
                             <div class="text-slate-300 space-y-1">
                                 <p><span class="text-green-400">#1-10:</span> Earn points equal to position</p>
-                                <p><span class="text-red-400">#11-15:</span> TENSION! Lose 5 points</p>
+                                <p><span class="text-red-400">#11-15:</span> FRICTION! Lose 5 points</p>
                             </div>
                         </div>
 
@@ -483,7 +554,7 @@ new #[Layout('components.layouts.app')] class extends Component {
                     @endif
                 </div>
 
-            @elseif(in_array($roundStatus, ['revealing', 'tension']))
+            @elseif(in_array($roundStatus, ['revealing', 'friction']))
                 <!-- Revealing answers -->
                 <div class="text-center py-12">
                     <p class="text-slate-400 text-sm mb-4">Round {{ $currentRoundNumber }}</p>

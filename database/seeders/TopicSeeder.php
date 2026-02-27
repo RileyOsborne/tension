@@ -8,7 +8,7 @@ use Illuminate\Database\Seeder;
 class TopicSeeder extends Seeder
 {
     /**
-     * Seed standard topics for the Tension game.
+     * Seed standard topics for the Friction game.
      */
     public function run(): void
     {

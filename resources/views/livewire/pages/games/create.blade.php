@@ -7,21 +7,18 @@ use Livewire\Attributes\Title;
 
 new #[Layout('components.layouts.app')] #[Title('Create Game')] class extends Component {
     public string $name = '';
-    public int $playerCount = 2;
 
     public function save(): void
     {
         $this->validate([
             'name' => 'required|string|max:255',
-            'playerCount' => 'required|integer|min:2',
         ]);
 
         $game = Game::create([
             'name' => $this->name,
-            'player_count' => $this->playerCount,
         ]);
 
-        session()->flash('message', 'Game created! Now add players and categories.');
+        session()->flash('message', 'Game created! Add players or share the join code.');
         $this->redirect(route('games.show', $game), navigate: true);
     }
 }; ?>
@@ -37,30 +34,19 @@ new #[Layout('components.layouts.app')] #[Title('Create Game')] class extends Co
 
         <form wire:submit="save" class="space-y-6">
             <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                <div class="space-y-6">
-                    <div>
-                        <label class="block text-sm font-medium text-slate-300 mb-2">Game Name</label>
-                        <input type="text"
-                               wire:model="name"
-                               placeholder="Friday Game Night"
-                               class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500">
-                        @error('name') <span class="text-red-400 text-sm">{{ $message }}</span> @enderror
-                    </div>
-
-                    <div>
-                        <label class="block text-sm font-medium text-slate-300 mb-2">Number of Players</label>
-                        <input type="number"
-                               wire:model.live="playerCount"
-                               min="2"
-                               class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white focus:outline-none focus:ring-2 focus:ring-red-500">
-                        @error('playerCount') <span class="text-red-400 text-sm">{{ $message }}</span> @enderror
-
-                        <p class="text-slate-400 mt-2">
-                            This will create <span class="text-white font-semibold">{{ $playerCount * 2 }} rounds</span>
-                            (2 rounds per player)
-                        </p>
-                    </div>
+                <div>
+                    <label class="block text-sm font-medium text-slate-300 mb-2">Game Name</label>
+                    <input type="text"
+                           wire:model="name"
+                           placeholder="Friday Game Night"
+                           autofocus
+                           class="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-red-500">
+                    @error('name') <span class="text-red-400 text-sm">{{ $message }}</span> @enderror
                 </div>
+
+                <p class="text-slate-400 mt-4 text-sm">
+                    After creating, you'll get a join code that players can use to join. You can also add players manually.
+                </p>
             </div>
 
             <div class="flex justify-end gap-4">

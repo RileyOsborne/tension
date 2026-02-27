@@ -1,4 +1,4 @@
-# Tension
+# Friction
 
 A trivia game built with Laravel and Livewire.
 

@@ -367,14 +367,13 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
         // Find matching answer using fuzzy matching
         $answer = $this->findMatchingAnswer($answerText);
 
-        // If match found, use its points; otherwise it's "not on list" = -3
-        $points = $answer ? $answer->points : -3;
+        // If match found, use its points; otherwise it's "not on list"
+        $points = $answer ? $answer->points : $this->game->not_on_list_penalty;
 
         // Apply double if selected
         $wasDoubled = $this->playerDoubles[$playerId] ?? false;
         if ($wasDoubled && $player->canUseDouble()) {
-            $points *= 2;
-            $player->update(['double_used' => true]);
+            $points *= $this->game->double_multiplier;
         }
 
         // Create player answer record
@@ -457,7 +456,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
 
         // Apply double if it was doubled
         if ($playerAnswer->was_doubled) {
-            $newPoints *= 2;
+            $newPoints *= $this->game->double_multiplier;
         }
 
         $playerAnswer->update([
@@ -589,7 +588,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                     </div>
                 @endif
                 <div class="flex gap-3">
-                    <a href="{{ route('games.present', $game) }}" target="tension-presentation"
+                    <a href="{{ route('games.present', $game) }}" target="friction-presentation"
                        class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-medium transition">
                         Open Presentation
                     </a>
@@ -736,7 +735,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                                                             <button type="button"
                                                                     x-show="input.length > 0 && '{{ strtolower(addslashes($answer->display_text)) }}'.includes(input)"
                                                                     @click="$wire.set('playerAnswers.{{ $player->id }}', '{{ addslashes($answer->display_text) }}'); open = false; $wire.submitPlayerAnswer('{{ $player->id }}')"
-                                                                    class="w-full text-left px-4 py-2 hover:bg-slate-700 transition {{ $answer->is_tension ? 'text-red-400' : '' }}">
+                                                                    class="w-full text-left px-4 py-2 hover:bg-slate-700 transition {{ $answer->is_friction ? 'text-red-400' : '' }}">
                                                                 <span class="text-slate-500 mr-2">#{{ $answer->position }}</span>
                                                                 {{ $answer->display_text }}
                                                             </button>
@@ -744,10 +743,10 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                                                     </div>
                                                 </div>
 
-                                                @if(!$player->double_used)
+                                                @if($player->canUseDouble())
                                                     <label class="flex items-center gap-1 cursor-pointer flex-shrink-0">
                                                         <input type="checkbox" wire:model.live="playerDoubles.{{ $player->id }}" class="w-4 h-4 rounded">
-                                                        <span class="text-yellow-400 text-sm">2x</span>
+                                                        <span class="text-yellow-400 text-sm">{{ $game->double_multiplier }}x</span>
                                                     </label>
                                                 @endif
 
@@ -793,25 +792,25 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                             </div>
                         </div>
 
-                    {{-- REVEALING / TENSION PHASE --}}
-                    @elseif(in_array($currentRound?->status, ['revealing', 'tension']))
+                    {{-- REVEALING / FRICTION PHASE --}}
+                    @elseif(in_array($currentRound?->status, ['revealing', 'friction']))
                         <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
                             <div class="flex justify-between items-center mb-6">
                                 <h2 class="text-xl font-bold">
-                                    @if($revealedCount <= 10)
-                                        Revealing Top 10
+                                    @if($revealedCount <= $game->top_answers_count)
+                                        Revealing Top {{ $game->top_answers_count }}
                                     @else
-                                        Revealing TENSION Answers
+                                        Revealing FRICTION Answers
                                     @endif
                                 </h2>
-                                <span class="text-sm px-3 py-1 rounded {{ $revealedCount > 10 ? 'bg-red-600/20 text-red-400' : 'bg-green-600/20 text-green-400' }}">
+                                <span class="text-sm px-3 py-1 rounded {{ $revealedCount > $game->top_answers_count ? 'bg-red-600/20 text-red-400' : 'bg-green-600/20 text-green-400' }}">
                                     {{ $revealedCount }} / {{ $answers->count() }} revealed
                                 </span>
                             </div>
 
                             <!-- Answers Grid -->
                             <div class="grid grid-cols-2 gap-3 mb-6">
-                                @foreach($answers->take(10) as $answer)
+                                @foreach($answers->take($game->top_answers_count) as $answer)
                                     @php
                                         $isRevealed = $answer->position <= $revealedCount;
                                         $playersWithThis = collect($playerAnswerMap)->filter(fn($pa) => ($pa['answer']?->id ?? null) === $answer->id);
@@ -842,10 +841,10 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                                 @endforeach
                             </div>
 
-                            @if($answers->count() > 10)
-                                <h3 class="text-red-400 font-bold mb-3">TENSION ZONE</h3>
+                            @if($answers->count() > $game->top_answers_count)
+                                <h3 class="text-red-400 font-bold mb-3">FRICTION ZONE</h3>
                                 <div class="grid grid-cols-2 gap-3 mb-6">
-                                    @foreach($answers->skip(10) as $answer)
+                                    @foreach($answers->skip($game->top_answers_count) as $answer)
                                         @php
                                             $isRevealed = $answer->position <= $revealedCount;
                                             $playersWithThis = collect($playerAnswerMap)->filter(fn($pa) => ($pa['answer']?->id ?? null) === $answer->id);
@@ -1006,8 +1005,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                                     </div>
                                     <div class="flex items-center gap-2">
                                         <span class="text-xl font-bold">{{ $player->total_score }}</span>
-                                        @if(!$player->double_used)
-                                            <span class="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">2x</span>
+                                        @if($player->doublesRemaining() > 0)
+                                            <span class="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">{{ $game->double_multiplier }}x{{ $player->doublesRemaining() > 1 ? ' ×' . $player->doublesRemaining() : '' }}</span>
                                         @endif
                                         <!-- Remove button (hidden until hover) -->
                                         <button wire:click="confirmRemovePlayer('{{ $player->id }}')"
@@ -1057,12 +1056,12 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
                     </div>
 
                     <!-- Category Reference (GM only - shows full text) -->
-                    @if($currentRound && in_array($currentRound->status, ['collecting', 'revealing', 'tension']))
+                    @if($currentRound && in_array($currentRound->status, ['collecting', 'revealing', 'friction']))
                         <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
                             <h3 class="text-sm text-slate-400 mb-2">Answer Reference</h3>
                             <div class="space-y-1 text-sm max-h-64 overflow-auto">
                                 @foreach($answers as $answer)
-                                    <div class="flex justify-between {{ $answer->is_tension ? 'text-red-400' : 'text-slate-300' }}">
+                                    <div class="flex justify-between {{ $answer->is_friction ? 'text-red-400' : 'text-slate-300' }}">
                                         <span>#{{ $answer->position }} {{ $answer->text }}</span>
                                         <span>{{ $answer->points > 0 ? '+' : '' }}{{ $answer->points }}</span>
                                     </div>
@@ -1121,15 +1120,15 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
     <script data-navigate-track>
         (function() {
             const gameId = '{{ $game->id }}';
-            const channelName = 'tension-game-' + gameId;
+            const channelName = 'friction-game-' + gameId;
 
             // Close any existing channel for this game
-            if (window.tensionChannel) {
-                window.tensionChannel.close();
+            if (window.frictionChannel) {
+                window.frictionChannel.close();
             }
 
             const channel = new BroadcastChannel(channelName);
-            window.tensionChannel = channel;
+            window.frictionChannel = channel;
             console.log('[Control] BroadcastChannel initialized for game:', gameId);
 
             // Listen for Livewire 3 dispatched events

@@ -54,11 +54,11 @@ class Round extends Model
     public function getMaxSlide(): int
     {
         // Max slide is the highest position answer in the category
-        return $this->category->answers()->max('position') ?? 10;
+        return $this->category->answers()->max('position') ?? $this->game->top_answers_count;
     }
 
-    public function isOnTension(): bool
+    public function isOnFriction(): bool
     {
-        return $this->current_slide > 10;
+        return $this->current_slide > $this->game->top_answers_count;
     }
 }

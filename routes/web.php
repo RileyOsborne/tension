@@ -31,7 +31,8 @@ Volt::route('/games/{game}/control', 'pages.games.control')->name('games.control
 Route::get('/games/{game}/present', function (\App\Models\Game $game) {
     $game->load(['players', 'rounds.category.answers']);
     return view('games.present', compact('game'));
-})->name('games.present');
+})->name('games.present')
+  ->missing(fn() => response()->view('games.present-not-found'));
 
 // Player device routes
 Route::get('/join', [PlayerJoinController::class, 'index'])->name('player.join');

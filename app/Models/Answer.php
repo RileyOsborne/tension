@@ -17,13 +17,13 @@ class Answer extends Model
         'text',
         'stat',
         'position',
-        'is_tension',
+        'is_friction',
         'points',
     ];
 
     protected $casts = [
         'position' => 'integer',
-        'is_tension' => 'boolean',
+        'is_friction' => 'boolean',
         'points' => 'integer',
     ];
 
@@ -52,15 +52,15 @@ class Answer extends Model
     public static function booted(): void
     {
         static::creating(function (Answer $answer) {
-            // Auto-calculate is_tension and points based on position
-            $answer->is_tension = $answer->position > 10;
-            $answer->points = $answer->is_tension ? -5 : $answer->position;
+            // Auto-calculate is_friction and points based on position
+            $answer->is_friction = $answer->position > 10;
+            $answer->points = $answer->is_friction ? -5 : $answer->position;
         });
 
         static::updating(function (Answer $answer) {
             // Recalculate on update
-            $answer->is_tension = $answer->position > 10;
-            $answer->points = $answer->is_tension ? -5 : $answer->position;
+            $answer->is_friction = $answer->position > 10;
+            $answer->points = $answer->is_friction ? -5 : $answer->position;
         });
     }
 }

@@ -135,9 +135,9 @@ class GameStateMachine
 
         $round->update(['current_slide' => $newSlide]);
 
-        // Update status based on position
-        if ($newSlide > 10 && $round->status !== RoundStatus::Tension->value) {
-            $this->transitionRound($round, RoundStatus::Tension);
+        // Update status based on position using game config
+        if ($newSlide > $this->game->top_answers_count && $round->status !== RoundStatus::Friction->value) {
+            $this->transitionRound($round, RoundStatus::Friction);
         }
 
         $this->broadcast();
@@ -154,7 +154,7 @@ class GameStateMachine
         if (!$round) return;
 
         $maxAnswers = $round->category->answers->count();
-        $newStatus = $maxAnswers > 10 ? RoundStatus::Tension : RoundStatus::Revealing;
+        $newStatus = $maxAnswers > $this->game->top_answers_count ? RoundStatus::Friction : RoundStatus::Revealing;
 
         $round->update(['current_slide' => $maxAnswers, 'status' => $newStatus->value]);
 
@@ -239,7 +239,7 @@ class GameStateMachine
     }
 
     /**
-     * Go back to revealing phase from scoring or tension.
+     * Go back to revealing phase from scoring or friction.
      */
     public function goBackToRevealing(): void
     {
@@ -395,7 +395,7 @@ class GameStateMachine
                         'text' => $answer->display_text,
                         'stat' => $answer->stat,
                         'points' => $answer->points,
-                        'is_tension' => $answer->is_tension,
+                        'is_friction' => $answer->is_friction,
                         'players' => $playersWithAnswer,
                     ];
                 }
@@ -453,7 +453,17 @@ class GameStateMachine
                 'color' => $p->color,
                 'total_score' => $p->total_score,
                 'double_used' => $p->double_used,
+                'doubles_remaining' => $p->doublesRemaining(),
             ])->values()->toArray(),
+            // Game configuration for views
+            'config' => [
+                'topAnswersCount' => $this->game->top_answers_count,
+                'frictionPenalty' => $this->game->friction_penalty,
+                'notOnListPenalty' => $this->game->not_on_list_penalty,
+                'doubleMultiplier' => $this->game->double_multiplier,
+                'doublesPerPlayer' => $this->game->doubles_per_player,
+                'maxAnswersPerCategory' => $this->game->max_answers_per_category,
+            ],
         ];
     }
 

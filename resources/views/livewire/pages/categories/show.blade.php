@@ -64,16 +64,16 @@ new #[Layout('components.layouts.app')] class extends Component {
             </div>
         </div>
 
-        <!-- Tension Answers -->
+        <!-- Friction Answers -->
         @php
-            $tensionAnswers = $category->answers->filter(fn($a) => $a->position > 10);
+            $frictionAnswers = $category->answers->filter(fn($a) => $a->position > 10);
         @endphp
-        @if($tensionAnswers->isNotEmpty())
+        @if($frictionAnswers->isNotEmpty())
             <div class="bg-slate-800 rounded-xl p-6 border border-red-700/50">
-                <h2 class="text-xl font-semibold mb-4 text-red-400">Tension Answers</h2>
+                <h2 class="text-xl font-semibold mb-4 text-red-400">Friction Answers</h2>
 
                 <div class="space-y-2">
-                    @foreach($tensionAnswers as $answer)
+                    @foreach($frictionAnswers as $answer)
                         <div class="flex items-center gap-4 py-2 px-3 rounded-lg bg-slate-900/50">
                             <span class="w-8 text-right font-bold text-red-400">#{{ $answer->position }}</span>
                             <span class="flex-1 text-white font-medium">{{ $answer->text }}</span>

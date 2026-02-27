@@ -8,7 +8,7 @@ enum RoundStatus: string
     case Intro = 'intro';
     case Collecting = 'collecting';
     case Revealing = 'revealing';
-    case Tension = 'tension';
+    case Friction = 'friction';
     case Scoring = 'scoring';
     case Complete = 'complete';
 
@@ -22,9 +22,9 @@ enum RoundStatus: string
             self::Pending => [self::Intro],
             self::Intro => [self::Collecting, self::Pending],
             self::Collecting => [self::Revealing, self::Intro], // Can go back to intro
-            self::Revealing => [self::Tension, self::Scoring, self::Collecting], // Can go back to collecting
-            self::Tension => [self::Scoring, self::Revealing], // Can go back to revealing
-            self::Scoring => [self::Complete, self::Revealing, self::Tension], // Can go back to revealing/tension
+            self::Revealing => [self::Friction, self::Scoring, self::Collecting], // Can go back to collecting
+            self::Friction => [self::Scoring, self::Revealing], // Can go back to revealing
+            self::Scoring => [self::Complete, self::Revealing, self::Friction], // Can go back to revealing/friction
             self::Complete => [self::Pending],
         };
     }

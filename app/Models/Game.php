@@ -24,6 +24,14 @@ class Game extends Model
         'timer_running',
         'timer_started_at',
         'show_rules',
+        // Game configuration
+        'top_answers_count',
+        'friction_penalty',
+        'not_on_list_penalty',
+        'rounds_per_player',
+        'double_multiplier',
+        'doubles_per_player',
+        'max_answers_per_category',
     ];
 
     protected $casts = [
@@ -34,6 +42,14 @@ class Game extends Model
         'timer_running' => 'boolean',
         'timer_started_at' => 'datetime',
         'show_rules' => 'boolean',
+        // Game configuration
+        'top_answers_count' => 'integer',
+        'friction_penalty' => 'integer',
+        'not_on_list_penalty' => 'integer',
+        'rounds_per_player' => 'integer',
+        'double_multiplier' => 'integer',
+        'doubles_per_player' => 'integer',
+        'max_answers_per_category' => 'integer',
     ];
 
     public function players(): HasMany
@@ -97,8 +113,46 @@ class Game extends Model
     public static function booted(): void
     {
         static::creating(function (Game $game) {
-            $game->total_rounds = $game->player_count * 2;
+            // Initialize player_count to 0 if not set (players join dynamically)
+            $game->player_count = $game->player_count ?? 0;
+            // Total rounds will be calculated dynamically as players join
+            $game->total_rounds = $game->player_count * ($game->rounds_per_player ?? 2);
             $game->join_code = static::generateJoinCode();
         });
+    }
+
+    /**
+     * Recalculate player_count and total_rounds based on active players.
+     * Call this after players join, leave, or are removed.
+     */
+    public function recalculateFromPlayers(): void
+    {
+        $activeCount = $this->players()
+            ->whereNull('removed_at')
+            ->count();
+
+        $this->update([
+            'player_count' => $activeCount,
+            'total_rounds' => $activeCount * ($this->rounds_per_player ?? 2),
+        ]);
+    }
+
+    /**
+     * Calculate points for a given position based on this game's config.
+     */
+    public function calculatePoints(int $position): int
+    {
+        if ($position > $this->top_answers_count) {
+            return $this->friction_penalty;
+        }
+        return $position;
+    }
+
+    /**
+     * Check if a position is in the friction zone for this game.
+     */
+    public function isPositionFriction(int $position): bool
+    {
+        return $position > $this->top_answers_count;
     }
 }
