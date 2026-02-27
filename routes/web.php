@@ -34,6 +34,11 @@ Route::get('/games/{game}/present', function (\App\Models\Game $game) {
 })->name('games.present')
   ->missing(fn() => response()->view('games.present-not-found'));
 
+// Explicit not-found route for deleted games (used when redirecting after deletion)
+Route::get('/present/{gameId}/not-found', function () {
+    return response()->view('games.present-not-found');
+})->name('games.present.not-found');
+
 // Player device routes
 Route::get('/join', [PlayerJoinController::class, 'index'])->name('player.join');
 Route::post('/join', [PlayerJoinController::class, 'findGame'])->name('player.join.find');

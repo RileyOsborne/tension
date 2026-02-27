@@ -2,7 +2,7 @@
     <div class="min-h-screen flex items-center justify-center px-4">
         <div class="w-full max-w-sm">
             <div class="text-center mb-8">
-                <h1 class="text-5xl font-black tracking-tight">
+                <h1 class="text-5xl font-title tracking-tight">
                     <span class="text-white">FRIC</span><span class="text-red-500">TION</span>
                 </h1>
                 <p class="text-slate-400 mt-2">Enter the game code to join</p>

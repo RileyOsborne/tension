@@ -38,6 +38,9 @@ new #[Layout('components.layouts.app')] class extends Component {
     // Track if we were ever in an active game (to detect resets)
     public bool $wasInActiveGame = false;
 
+    // Track if the game has been deleted
+    public bool $gameDeleted = false;
+
     public function mount(Game $game): void
     {
         $this->game = $game;
@@ -66,6 +69,12 @@ new #[Layout('components.layouts.app')] class extends Component {
         $hasPlayedBefore = $this->game->current_round > 0 ||
             $this->game->rounds()->whereHas('playerAnswers')->exists();
         $this->wasInActiveGame = $hasPlayedBefore;
+    }
+
+    #[On('echo:game.{game.id},game.deleted')]
+    public function handleGameDeleted(array $data): void
+    {
+        $this->gameDeleted = true;
     }
 
     #[On('echo:game.{game.id},state.updated')]
@@ -357,6 +366,24 @@ new #[Layout('components.layouts.app')] class extends Component {
                 </a>
             </div>
 
+        @elseif($gameDeleted)
+            <!-- Game was deleted -->
+            <div class="text-center py-12">
+                <div class="w-20 h-20 mx-auto mb-6 rounded-full bg-slate-800 flex items-center justify-center">
+                    <svg class="w-10 h-10 text-slate-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                </div>
+
+                <h2 class="text-2xl font-bold mb-2">Game Deleted</h2>
+                <p class="text-slate-400 mb-8">This game has been deleted by the Game Master.</p>
+
+                <a href="{{ route('player.join') }}"
+                   class="inline-block px-6 py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition">
+                    Join Another Game
+                </a>
+            </div>
+
         @elseif(($gameStatus === 'draft' || $gameStatus === 'ready') && $wasInActiveGame)
             <!-- Game was reset or ended early -->
             <div class="text-center py-12">
@@ -384,7 +411,7 @@ new #[Layout('components.layouts.app')] class extends Component {
         @elseif($gameStatus === 'draft' || $gameStatus === 'ready')
             <!-- Lobby - Waiting for game to start -->
             <div class="text-center py-12">
-                <h1 class="text-4xl font-black mb-2">
+                <h1 class="text-4xl font-title mb-2">
                     <span class="text-white">FRIC</span><span class="text-red-500">TION</span>
                 </h1>
                 <p class="text-slate-400 mb-8">You're in!</p>

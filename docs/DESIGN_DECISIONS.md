@@ -99,6 +99,73 @@ Use multi-strategy fuzzy matching instead of exact match only.
 - **GM control**: GM can always override matches
 - **Balance**: Reward players who know exact answers
 
+## Confirmation Modals (Not Browser Dialogs)
+
+### Decision
+Use styled, in-page confirmation modals instead of browser-native `confirm()` dialogs or `wire:confirm`.
+
+### Why?
+- **Consistent design**: Matches the application's dark theme and styling
+- **Better UX**: More context can be shown (warnings, additional info)
+- **Mobile-friendly**: Browser dialogs vary across devices
+- **Branded experience**: Feels part of the app, not a system interruption
+- **Accessibility**: Better keyboard navigation and screen reader support
+
+### Implementation Pattern
+```php
+// In Livewire component:
+public bool $showDeleteModal = false;
+public ?string $itemToDelete = null;
+
+public function confirmDelete(string $id): void
+{
+    $this->itemToDelete = $id;
+    $this->showDeleteModal = true;
+}
+
+public function cancelDelete(): void
+{
+    $this->showDeleteModal = false;
+    $this->itemToDelete = null;
+}
+
+public function deleteItem(): void
+{
+    if (!$this->itemToDelete) return;
+    // ... delete logic
+    $this->cancelDelete();
+}
+```
+
+```html
+<!-- In Blade template: -->
+@if($showDeleteModal)
+    <div class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
+        <div class="flex min-h-screen items-center justify-center p-4">
+            <div class="fixed inset-0 bg-black/70" wire:click="cancelDelete"></div>
+            <div class="relative bg-slate-800 rounded-xl shadow-xl w-full max-w-md border border-slate-700">
+                <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+                    <h3 class="text-lg font-bold text-red-400">Delete Item</h3>
+                    <button wire:click="cancelDelete" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+                </div>
+                <div class="p-6">
+                    <p class="text-slate-300 mb-6">Are you sure? This cannot be undone.</p>
+                    <div class="flex justify-end gap-3">
+                        <button wire:click="cancelDelete" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg">Cancel</button>
+                        <button wire:click="deleteItem" class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg">Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+@endif
+```
+
+### When to Show Confirmation
+- **Always**: Destructive actions (delete, remove, reset)
+- **Conditional**: Replacing existing data (only if data exists)
+- **Never**: Non-destructive actions (create, view, navigate)
+
 ## ULIDs Instead of Auto-Increment IDs
 
 ### Decision

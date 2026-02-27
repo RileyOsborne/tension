@@ -3,7 +3,7 @@
         <!-- Rules Slide -->
         <div id="slide-rules" class="hidden w-full max-w-5xl mx-auto px-8">
             <div class="animate-fade-in">
-                <h1 class="text-5xl font-bold mb-8 text-center">How to Play <span class="text-white">FRIC</span><span class="text-red-500">TION</span></h1>
+                <h1 class="text-5xl font-bold mb-8 text-center">How to Play <span class="text-6xl font-title"><span class="text-white">FRIC</span><span class="text-red-500">TION</span></span></h1>
 
                 <!-- The Goal -->
                 <div class="bg-slate-800 rounded-xl p-6 border border-slate-700 mb-8">
@@ -150,7 +150,7 @@
             <div class="animate-fade-in">
                 <!-- Title -->
                 <div class="text-center mb-8">
-                    <h1 class="text-6xl font-black mb-2">
+                    <h1 class="text-8xl font-title mb-2">
                         <span class="text-white">FRIC</span><span class="text-red-500">TION</span>
                     </h1>
                     <p class="text-2xl text-slate-400">Join the game!</p>
@@ -826,6 +826,13 @@
                 return;
             }
 
+            // Handle game deleted via BroadcastChannel
+            if (event.data && event.data.type === 'deleted') {
+                console.log('[Present] GAME DELETED via BroadcastChannel');
+                showGameNotFound();
+                return;
+            }
+
             // Stop polling once game becomes active
             if (event.data && event.data.gameStatus === 'playing' && !isGameActive) {
                 isGameActive = true;
@@ -840,6 +847,33 @@
         };
 
         console.log('[Present] BroadcastChannel initialized for game:', gameId);
+
+        // Redirect to game not found page
+        function showGameNotFound() {
+            // Stop any polling
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+                pollingInterval = null;
+            }
+            window.location.href = '/present/' + gameId + '/not-found';
+        }
+
+        // Listen for game deletion via WebSocket (Echo/Reverb)
+        // Retry until Echo is available (it loads asynchronously)
+        function setupEchoListener() {
+            if (window.Echo) {
+                window.Echo.channel('game.' + gameId)
+                    .listen('.game.deleted', function(data) {
+                        console.log('[Present] Game deleted event received:', data);
+                        showGameNotFound();
+                    });
+                console.log('[Present] Echo listener initialized for game deletion');
+            } else {
+                // Echo not ready yet, retry in 100ms
+                setTimeout(setupEchoListener, 100);
+            }
+        }
+        setupEchoListener();
 
         // Always start with lobby view - control panel will push actual state if game is active
         var lobbyState = {

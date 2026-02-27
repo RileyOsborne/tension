@@ -15,7 +15,7 @@
 
 <div class="{{ $presentation ? 'text-center' : '' }}">
     @if($presentation)
-        <h1 class="text-6xl font-black mb-8">
+        <h1 class="text-6xl font-title mb-8">
             <span class="text-white">FRIC</span><span class="text-red-500">TION</span>
         </h1>
     @endif

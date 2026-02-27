@@ -34,6 +34,9 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
     public array $categoryAnswerStats = [];
     public string $bulkAnswers = '';
 
+    // Randomize confirmation modal
+    public bool $showRandomizeModal = false;
+
     public function mount(Game $game): void
     {
         $this->game = $game->load(['players', 'rounds.category']);
@@ -371,6 +374,66 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         }
     }
 
+    public function tryRandomizeAll(): void
+    {
+        // If categories are already selected, show confirmation modal
+        if (!empty(array_filter($this->roundCategories))) {
+            $this->showRandomizeModal = true;
+            return;
+        }
+
+        // Otherwise, randomize directly
+        $this->randomizeAllCategories();
+    }
+
+    public function closeRandomizeModal(): void
+    {
+        $this->showRandomizeModal = false;
+    }
+
+    public function randomizeAllCategories(): void
+    {
+        $this->showRandomizeModal = false;
+
+        // Calculate effective total rounds
+        $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
+        $effectiveTotalRounds = $activePlayers->count() * ($this->game->rounds_per_player ?? 2);
+
+        // Get all available categories (filtered by current filters)
+        $available = Category::with('topic')
+            ->whereHas('answers', function ($q) {
+                $q->where('position', '<=', 10);
+            }, '>=', 10)
+            ->when($this->topicFilter, fn($q) => $q->where('topic_id', $this->topicFilter))
+            ->when($this->searchQuery, fn($q) => $q->where('title', 'like', "%{$this->searchQuery}%"))
+            ->inRandomOrder()
+            ->limit($effectiveTotalRounds)
+            ->get();
+
+        // Clear existing selections
+        $this->roundCategories = [];
+
+        // Assign categories to rounds
+        foreach ($available as $index => $category) {
+            $roundNumber = $index + 1;
+            if ($roundNumber > $effectiveTotalRounds) break;
+
+            Round::updateOrCreate(
+                ['game_id' => $this->game->id, 'round_number' => $roundNumber],
+                ['category_id' => $category->id]
+            );
+            $this->roundCategories[$roundNumber] = $category->id;
+        }
+
+        // Remove any rounds beyond the effective total
+        $this->game->rounds()
+            ->where('round_number', '>', $effectiveTotalRounds)
+            ->delete();
+
+        $this->game->refresh();
+        $this->checkReady();
+    }
+
     public function refreshPlayerStatus(): void
     {
         // Refresh player data and broadcast to presentation if join code active
@@ -593,10 +656,20 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                     <h2 class="text-xl font-semibold">
                         Rounds ({{ $game->rounds->count() }}/{{ $effectiveTotalRounds }})
                     </h2>
-                    <button wire:click="openCategoryModal"
-                            class="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg font-medium transition">
-                        + New Category
-                    </button>
+                    <div class="flex gap-2">
+                        <button wire:click="tryRandomizeAll"
+                                class="text-sm bg-slate-700 hover:bg-slate-600 px-3 py-1.5 rounded-lg font-medium transition flex items-center gap-1.5"
+                                title="Randomly assign categories to all rounds">
+                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                            </svg>
+                            Randomize All
+                        </button>
+                        <button wire:click="openCategoryModal"
+                                class="text-sm bg-blue-600 hover:bg-blue-700 px-3 py-1.5 rounded-lg font-medium transition">
+                            + New Category
+                        </button>
+                    </div>
                 </div>
 
                 <!-- Search -->
@@ -877,6 +950,39 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
                             </button>
                         </div>
                     </form>
+                </div>
+            </div>
+        </div>
+    @endif
+
+    <!-- Randomize All Confirmation Modal -->
+    @if($showRandomizeModal)
+        <div class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
+            <div class="flex min-h-screen items-center justify-center p-4">
+                <div class="fixed inset-0 bg-black/70 transition-opacity" wire:click="closeRandomizeModal"></div>
+
+                <div class="relative bg-slate-800 rounded-xl shadow-xl w-full max-w-md border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+                        <h3 class="text-lg font-bold">Randomize Categories</h3>
+                        <button wire:click="closeRandomizeModal" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+                    </div>
+
+                    <div class="p-6">
+                        <p class="text-slate-300 mb-6">
+                            This will replace all current category selections with random ones. Are you sure you want to continue?
+                        </p>
+
+                        <div class="flex justify-end gap-3">
+                            <button wire:click="closeRandomizeModal"
+                                    class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium transition">
+                                Cancel
+                            </button>
+                            <button wire:click="randomizeAllCategories"
+                                    class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg font-medium transition">
+                                Randomize All
+                            </button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>

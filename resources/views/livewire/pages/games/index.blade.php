@@ -1,11 +1,16 @@
 <?php
 
 use App\Models\Game;
+use App\Events\GameDeleted;
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
 use Livewire\Attributes\Title;
 
 new #[Layout('components.layouts.app')] #[Title('Games')] class extends Component {
+    public bool $showDeleteModal = false;
+    public ?string $gameToDelete = null;
+    public ?string $gameToDeleteName = null;
+
     public function with(): array
     {
         return [
@@ -16,9 +21,35 @@ new #[Layout('components.layouts.app')] #[Title('Games')] class extends Componen
         ];
     }
 
-    public function deleteGame(Game $game): void
+    public function confirmDelete(string $gameId, string $gameName): void
     {
+        $this->gameToDelete = $gameId;
+        $this->gameToDeleteName = $gameName;
+        $this->showDeleteModal = true;
+    }
+
+    public function cancelDelete(): void
+    {
+        $this->showDeleteModal = false;
+        $this->gameToDelete = null;
+        $this->gameToDeleteName = null;
+    }
+
+    public function deleteGame(): void
+    {
+        if (!$this->gameToDelete) return;
+
+        $game = Game::find($this->gameToDelete);
+        if (!$game) {
+            $this->cancelDelete();
+            return;
+        }
+
+        // Broadcast deletion event before deleting so connected clients can react
+        event(new GameDeleted($game->id));
+
         $game->delete();
+        $this->cancelDelete();
         session()->flash('message', 'Game deleted successfully.');
     }
 
@@ -117,8 +148,7 @@ new #[Layout('components.layouts.app')] #[Title('Games')] class extends Componen
                                     </a>
                                 @endif
                             </div>
-                            <button wire:click="deleteGame('{{ $game->id }}')"
-                                    wire:confirm="Are you sure you want to delete this game?"
+                            <button wire:click="confirmDelete('{{ $game->id }}', '{{ addslashes($game->name) }}')"
                                     class="text-red-400 hover:text-red-300 font-medium">
                                 Delete
                             </button>
@@ -128,4 +158,40 @@ new #[Layout('components.layouts.app')] #[Title('Games')] class extends Componen
             </div>
         @endif
     </div>
+
+    <!-- Delete Game Confirmation Modal -->
+    @if($showDeleteModal)
+        <div class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
+            <div class="flex min-h-screen items-center justify-center p-4">
+                <div class="fixed inset-0 bg-black/70 transition-opacity" wire:click="cancelDelete"></div>
+
+                <div class="relative bg-slate-800 rounded-xl shadow-xl w-full max-w-md border border-slate-700">
+                    <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
+                        <h3 class="text-lg font-bold text-red-400">Delete Game</h3>
+                        <button wire:click="cancelDelete" class="text-slate-400 hover:text-white text-2xl">&times;</button>
+                    </div>
+
+                    <div class="p-6">
+                        <p class="text-slate-300 mb-2">
+                            Are you sure you want to delete <span class="font-semibold text-white">{{ $gameToDeleteName }}</span>?
+                        </p>
+                        <p class="text-slate-400 text-sm mb-6">
+                            This will disconnect any players currently in the game and cannot be undone.
+                        </p>
+
+                        <div class="flex justify-end gap-3">
+                            <button wire:click="cancelDelete"
+                                    class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-medium transition">
+                                Cancel
+                            </button>
+                            <button wire:click="deleteGame"
+                                    class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition">
+                                Delete Game
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    @endif
 </div>
