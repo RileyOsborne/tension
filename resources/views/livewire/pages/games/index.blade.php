@@ -87,16 +87,26 @@ new #[Layout('components.layouts.app')] #[Title('Games')] class extends Componen
             $this->redirect(route('games.show', $game), navigate: true);
         }
     }
+
+    public function createGame(): void
+    {
+        $game = Game::create([
+            'name' => 'New Game ' . now()->format('M j, Y'),
+            'status' => 'draft',
+        ]);
+
+        $this->redirect(route('games.show', $game), navigate: true);
+    }
 }; ?>
 
 <div>
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div class="flex justify-between items-center mb-8">
             <h1 class="text-3xl font-bold">Games</h1>
-            <a href="{{ route('games.create') }}"
+            <button wire:click="createGame"
                class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-3 rounded-lg font-semibold transition">
                 + New Game
-            </a>
+            </button>
         </div>
 
         @if (session('message'))

@@ -29,14 +29,16 @@
     <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.0/Sortable.min.js"></script>
 </head>
 <body class="min-h-screen bg-slate-900 text-white antialiased">
-    <nav class="bg-slate-800 border-b border-slate-700">
+    <nav class="bg-slate-800/50 backdrop-blur-md border-b border-white/5 sticky top-0 z-50">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center space-x-8">
-                    <a href="/" class="text-2xl font-title"><span class="inline-flex items-baseline"><span class="text-white">FRIC</span><span class="text-red-500 ml-[0.04em]">TION</span></span></a>
-                    <a href="{{ route('games.index') }}" class="text-slate-300 hover:text-white transition">Games</a>
-                    <a href="{{ route('categories.index') }}" class="text-slate-300 hover:text-white transition">Categories</a>
-                    <a href="{{ route('rules') }}" class="text-slate-300 hover:text-white transition">Rules</a>
+            <div class="flex justify-between h-24">
+                <div class="flex items-center space-x-16">
+                    <a href="/" class="text-4xl font-title"><span class="inline-flex items-baseline"><span class="text-white">FRIC</span><span class="text-red-500 ml-[0.04em]">TION</span></span></a>
+                    <div class="flex items-center space-x-10 text-base font-black uppercase tracking-widest">
+                        <a href="{{ route('games.index') }}" class="{{ request()->routeIs('games.*') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Games</a>
+                        <a href="{{ route('categories.index') }}" class="{{ request()->routeIs('categories.*') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Categories</a>
+                        <a href="{{ route('rules') }}" class="{{ request()->routeIs('rules') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Rules</a>
+                    </div>
                 </div>
             </div>
         </div>

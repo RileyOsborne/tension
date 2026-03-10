@@ -3,9 +3,6 @@
 use App\Models\Game;
 use App\Models\Player;
 use App\Models\Round;
-use App\Models\Category;
-use App\Models\Answer;
-use App\Models\PlayerAnswer;
 use App\Services\GameStateMachine;
 use Livewire\Volt\Component;
 use Livewire\Attributes\Layout;
@@ -17,14 +14,6 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
     public ?Round $currentRound = null;
     protected ?GameStateMachine $stateMachine = null;
 
-    // Player answer collection
-    public array $playerAnswers = []; // player_id => answer text
-    public array $playerDoubles = []; // player_id => bool (using double)
-
-    // Reveal tracking (local UI state, synced from database)
-    public int $revealedCount = 0; // How many answers have been revealed (1-15)
-
-    // Player removal confirmation
     public ?string $confirmingRemovePlayerId = null;
 
     protected function getStateMachine(): GameStateMachine
@@ -45,73 +34,29 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
     #[On('echo:game.{game.id},player.answer.submitted')]
     public function handlePlayerAnswer(array $data): void
     {
-        \Illuminate\Support\Facades\Log::info('Answer signal received in GM Control', $data);
-        
-        // Refresh everything to ensure we have the latest state
-        $this->game->refresh();
-        $this->game->load(['players', 'rounds']);
-        $this->getStateMachine()->refresh();
-        
-        $this->loadCurrentState();
-        $this->broadcastState();
+        $this->refreshAll();
     }
 
     #[On('echo:game.{game.id},player.joined')]
     public function handlePlayerJoined(array $data): void
     {
-        // Player joined or reconnected - refresh and broadcast
-        $this->game->refresh();
-        $this->game->load(['players', 'rounds']);
-        $this->getStateMachine()->refresh();
-        
-        $this->loadCurrentState();
-        $this->broadcastState();
+        $this->refreshAll();
     }
 
     #[On('echo:game.{game.id},player.left')]
     public function handlePlayerLeft(array $data): void
     {
-        // Player disconnected - refresh and broadcast
+        $this->refreshAll();
+    }
+
+    #[On('player-answer-updated')]
+    #[On('state-updated')]
+    public function refreshAll(): void
+    {
         $this->game->refresh();
         $this->game->load(['players', 'rounds']);
         $this->getStateMachine()->refresh();
-        
         $this->loadCurrentState();
-        $this->broadcastState();
-    }
-
-    /**
-     * Periodically refresh player connection status.
-     * This catches disconnections (which are passive - heartbeats just stop)
-     * and reconnections even if Echo events are missed.
-     */
-    public function refreshPlayerStatus(): void
-    {
-        // Force fresh data from database
-        $this->game->refresh();
-        $this->game->load(['players', 'rounds']);
-
-        // Refresh state machine
-        $this->getStateMachine()->refresh();
-        
-        // Ensure local GM inputs are updated if answers came in
-        $this->loadCurrentState();
-        
-        // Broadcast to presentation view
-        $this->broadcastState();
-    }
-
-    public function startThinkingTimer(): void
-    {
-        $this->getStateMachine()->startTimer();
-        $this->game = $this->getStateMachine()->getGame();
-        $this->broadcastState();
-    }
-
-    public function stopThinkingTimer(): void
-    {
-        $this->getStateMachine()->stopTimer();
-        $this->game = $this->getStateMachine()->getGame();
         $this->broadcastState();
     }
 
@@ -127,282 +72,79 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
             ->where('round_number', $this->game->current_round)
             ->with(['category.answers', 'playerAnswers.player', 'playerAnswers.answer'])
             ->first();
-
-        // Load existing player answers for this round
-        if ($this->currentRound) {
-            $this->revealedCount = $this->currentRound->current_slide;
-
-            // Initialize player answers array
-            foreach ($this->game->players as $player) {
-                $existing = $this->currentRound->playerAnswers->where('player_id', $player->id)->first();
-                if ($existing) {
-                    $this->playerAnswers[$player->id] = $existing->answer?->display_text 
-                        ?? $existing->answer?->text 
-                        ?? $existing->input_text;
-                } else {
-                    $this->playerAnswers[$player->id] = '';
-                }
-                $this->playerDoubles[$player->id] = false;
-            }
-        }
     }
 
-    public function with(): array
-    {
-        $answers = $this->currentRound?->category->answers->sortBy('position') ?? collect();
-
-        // Get revealed answers (positions 1 to revealedCount)
-        $revealedAnswers = $answers->filter(fn($a) => $a->position <= $this->revealedCount);
-
-        // Build player answers map for display
-        $playerAnswerMap = [];
-        if ($this->currentRound) {
-            foreach ($this->currentRound->playerAnswers as $pa) {
-                $playerAnswerMap[$pa->player_id] = [
-                    'answer' => $pa->answer,
-                    'answer_text' => $pa->answer?->text ?? 'Not on list',
-                    'points' => $pa->points_awarded,
-                    'was_doubled' => $pa->was_doubled,
-                ];
-            }
-        }
-
-        // Only show active players during gameplay
-        $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
-
-        // Get removed players
-        $removedPlayers = $this->game->players->filter(fn($p) => $p->isRemoved());
-
-        // Get turn order for current round (filtered to active players only)
-        $turnOrder = collect($this->game->getTurnOrderForRound($this->game->current_round))
-            ->filter(fn($p) => $p->isActive());
-
-        // Get current turn info
-        $turnInfo = $this->getStateMachine()->getCurrentTurnInfo();
-
-        return [
-            'players' => $activePlayers,
-            'removedPlayers' => $removedPlayers,
-            'answers' => $answers,
-            'revealedAnswers' => $revealedAnswers,
-            'playerAnswerMap' => $playerAnswerMap,
-            'allAnswersCollected' => $this->allAnswersCollected(),
-            'answerOptions' => $answers->pluck('text', 'id')->toArray(),
-            'turnOrder' => $turnOrder,
-            'currentTurnPlayer' => $turnInfo['currentPlayer'],
-            'currentTurnIndex' => $turnInfo['currentTurnIndex'],
-            'timerMode' => $turnInfo['timerMode'],
-        ];
-    }
-
-    public function allAnswersCollected(): bool
-    {
-        if (!$this->currentRound) return false;
-
-        // Only check active players (connected self-registered or GM-created)
-        $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
-
-        foreach ($activePlayers as $player) {
-            if (empty($this->playerAnswers[$player->id] ?? '')) {
-                return false;
-            }
-        }
-        return true;
-    }
-
+    #[On('rules-dismissed')]
     public function dismissRules(): void
     {
         $this->getStateMachine()->dismissRules();
-        $this->game = $this->getStateMachine()->getGame();
-        $this->broadcastState();
+        $this->refreshAll();
     }
 
+    #[On('transition-to-collecting')]
     public function startCollecting(): void
     {
-        if (!$this->currentRound) return;
-
         $this->getStateMachine()->startCollecting();
-        $this->currentRound->refresh();
-        $this->broadcastState();
+        $this->refreshAll();
     }
 
-    public function goBackToIntro(): void
-    {
-        if (!$this->currentRound) return;
-
-        $this->getStateMachine()->goBackToIntro();
-        $this->currentRound->refresh();
-        $this->game = $this->getStateMachine()->getGame();
-        $this->broadcastState();
-    }
-
-    public function goBackToCollecting(): void
-    {
-        if (!$this->currentRound) return;
-
-        $this->getStateMachine()->goBackToCollecting();
-        $this->currentRound->refresh();
-        $this->revealedCount = 0;
-        $this->game = $this->getStateMachine()->getGame();
-        $this->broadcastState();
-    }
-
-    public function goBackToRevealing(): void
-    {
-        if (!$this->currentRound) return;
-
-        $this->getStateMachine()->goBackToRevealing();
-        $this->currentRound->refresh();
-        $this->revealedCount = $this->currentRound->current_slide;
-        $this->broadcastState();
-    }
-
-    public function submitPlayerAnswer(string $playerId): void
-    {
-        if (!$this->currentRound) return;
-
-        $answerText = trim($this->playerAnswers[$playerId] ?? '');
-        if (empty($answerText)) return;
-
-        // Use the state machine to process the answer
-        $this->getStateMachine()->submitPlayerAnswer(
-            $playerId,
-            $answerText,
-            $this->playerDoubles[$playerId] ?? false
-        );
-
-        // Reset local state
-        $this->playerDoubles[$playerId] = false;
-        $this->playerAnswers[$playerId] = '';
-
-        $this->game->refresh();
-        $this->loadCurrentState();
-        $this->broadcastState();
-    }
-
+    #[On('transition-to-reveal')]
     public function startRevealing(): void
     {
-        if (!$this->currentRound || !$this->allAnswersCollected()) return;
-
         $this->getStateMachine()->startRevealing();
-        $this->currentRound->refresh();
-        $this->revealedCount = 0;
-        $this->broadcastState();
+        $this->refreshAll();
     }
 
-    public function revealNext(): void
-    {
-        if (!$this->currentRound) return;
-
-        $this->revealedCount = $this->getStateMachine()->revealNext();
-        $this->currentRound->refresh();
-        $this->broadcastState();
-    }
-
-    public function revealAll(): void
-    {
-        if (!$this->currentRound) return;
-
-        $this->getStateMachine()->revealAll();
-        $this->currentRound->refresh();
-        $this->revealedCount = $this->currentRound->current_slide;
-        $this->broadcastState();
-    }
-
+    #[On('transition-to-scoring')]
     public function showScores(): void
     {
-        if (!$this->currentRound) return;
-
         $this->getStateMachine()->showScores();
-        $this->currentRound->refresh();
-        $this->game->refresh();
-        $this->broadcastState();
+        $this->refreshAll();
     }
 
-    public function correctAnswer(string $playerId, string $answerId): void
-    {
-        if (!$this->currentRound) return;
-
-        $playerAnswer = PlayerAnswer::where('round_id', $this->currentRound->id)
-            ->where('player_id', $playerId)
-            ->first();
-
-        if (!$playerAnswer) return;
-
-        $newAnswer = $this->currentRound->category->answers->find($answerId);
-        if (!$newAnswer) return;
-
-        $oldPoints = $playerAnswer->points_awarded;
-        $newPoints = $newAnswer->points;
-
-        // Apply double if it was doubled
-        if ($playerAnswer->was_doubled) {
-            $newPoints *= $this->game->double_multiplier;
-        }
-
-        $playerAnswer->update([
-            'answer_id' => $newAnswer->id,
-            'points_awarded' => $newPoints,
-        ]);
-
-        // Recalculate player's total score
-        $player = Player::find($playerId);
-        if ($player) {
-            $total = PlayerAnswer::where('player_id', $player->id)
-                ->whereHas('round', fn($q) => $q->where('game_id', $this->game->id))
-                ->sum('points_awarded');
-            $player->update(['total_score' => $total]);
-        }
-
-        $this->currentRound->refresh();
-        $this->game->refresh();
-        $this->broadcastState();
-    }
-
+    #[On('transition-to-next-round')]
     public function nextRound(): void
     {
-        if (!$this->currentRound) return;
-
-        $hasMoreRounds = $this->getStateMachine()->nextRound();
-        $this->game = $this->getStateMachine()->getGame();
-
-        if ($hasMoreRounds) {
+        $hasMore = $this->getStateMachine()->nextRound();
+        if ($hasMore) {
             $this->loadCurrentState();
         }
+        $this->refreshAll();
+    }
 
-        $this->broadcastState();
+    #[On('transition-to-intro')]
+    public function goBackToIntro(): void
+    {
+        $this->getStateMachine()->goBackToIntro();
+        $this->refreshAll();
+    }
+
+    #[On('transition-to-revealing')]
+    public function goBackToRevealing(): void
+    {
+        $this->getStateMachine()->goBackToRevealing();
+        $this->refreshAll();
     }
 
     public function returnToSetup(): void
     {
         $this->getStateMachine()->returnToSetup();
-        $this->game = $this->getStateMachine()->getGame();
-
-        // Broadcast to local presentation via BroadcastChannel
-        $state = $this->getStateMachine()->buildState();
-        $this->dispatch('game-state-updated', state: $state);
-
-        // Redirect to setup page
-        $this->redirect(route('games.show', $this->game));
+        $this->redirect(route('games.show', $this->game), navigate: true);
     }
 
     public function broadcastState(): void
     {
-        // Use state machine as single source of truth
-        $this->getStateMachine()->refresh();
         $state = $this->getStateMachine()->broadcast();
-
-        // Broadcast to local presentation via BroadcastChannel
         $this->dispatch('game-state-updated', state: $state);
     }
 
-    // Alias for compatibility with show.blade.php's Echo listener that persists after navigation
-    public function broadcastLobbyState(): void
+    public function confirmRemovePlayer(string $playerId): void
     {
-        $this->broadcastState();
+        $this->confirmingRemovePlayerId = $playerId;
     }
 
-    public function confirmRemovePlayer(string $playerId): void
+    #[On('confirm-remove-player')]
+    public function handleConfirmRemovePlayer($playerId): void
     {
         $this->confirmingRemovePlayerId = $playerId;
     }
@@ -418,580 +160,194 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
         $this->confirmingRemovePlayerId = null;
 
         $player = Player::find($playerId);
-        if (!$player || $player->game_id !== $this->game->id) {
-            return;
+        if ($player && $player->game_id === $this->game->id) {
+            $player->update(['removed_at' => now()]);
+            $this->refreshAll();
         }
-
-        $player->update(['removed_at' => now()]);
-
-        // Refresh state and broadcast
-        $this->game->refresh();
-        $this->getStateMachine()->refresh();
-        $this->loadCurrentState();
-        $this->broadcastState();
     }
 
     public function restorePlayer(string $playerId): void
     {
         $player = Player::find($playerId);
-        if (!$player || $player->game_id !== $this->game->id) {
-            return;
+        if ($player && $player->game_id === $this->game->id) {
+            $player->update(['removed_at' => null]);
+            $this->refreshAll();
         }
+    }
 
-        $player->update(['removed_at' => null]);
-
-        // Refresh state and broadcast
-        $this->game->refresh();
-        $this->getStateMachine()->refresh();
-        $this->loadCurrentState();
-        $this->broadcastState();
+    public function with(): array
+    {
+        return [
+            'activePlayers' => $this->game->players->filter(fn($p) => $p->isActive())->sortByDesc('total_score')->values(),
+            'removedPlayers' => $this->game->players->filter(fn($p) => $p->isRemoved()),
+            'answers' => $this->currentRound?->category->answers->sortBy('position') ?? collect(),
+        ];
     }
 }; ?>
 
-<div wire:poll.10s="refreshPlayerStatus">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <!-- Header -->
-        <div class="flex justify-between items-center mb-6">
-            <div>
-                <h1 class="text-2xl font-bold">{{ $game->name }}</h1>
-                <p class="text-slate-400">
-                    Round {{ $game->current_round }} of {{ $game->total_rounds }}
-                    @if($currentRound)
-                        - {{ $currentRound->category->title }}
-                    @endif
-                </p>
+<div class="min-h-screen bg-slate-950 bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-white antialiased flex flex-col" wire:poll.10s="refreshAll">
+    <!-- Clean, minimal top nav -->
+    <div class="px-8 py-4 flex items-center justify-between sticky top-0 z-40 bg-slate-900/50 backdrop-blur-md border-b border-white/5">
+        <div class="flex items-center gap-6">
+            <span class="text-2xl font-title tracking-tighter opacity-80">
+                <span class="inline-flex items-baseline"><span class="text-white">FRIC</span><span class="text-red-500 ml-[0.04em]">TION</span></span>
+            </span>
+            <span class="w-px h-6 bg-slate-700"></span>
+            <h1 class="text-xl font-black text-white tracking-tighter uppercase leading-none flex items-center gap-3">
+                <span class="text-slate-500">GM</span> {{ $game->name }}
+            </h1>
+            
+            <div class="ml-6 flex items-center gap-1.5">
+                @for($i = 1; $i <= $game->total_rounds; $i++)
+                    <div class="w-4 h-1.5 rounded-full {{ $i < $game->current_round ? 'bg-green-500' : ($i === $game->current_round ? 'bg-blue-500 shadow-[0_0_10px_rgba(59,130,246,0.5)]' : 'bg-slate-800') }}"></div>
+                @endfor
             </div>
-            <div class="flex items-center gap-4">
-                @if($game->join_code)
-                    <div class="bg-slate-800 rounded-lg px-4 py-2 border border-slate-600">
-                        <span class="text-slate-400 text-sm">Join Code:</span>
-                        <span class="font-mono text-2xl font-bold tracking-wider ml-2">{{ $game->join_code }}</span>
-                    </div>
-                @endif
-                <div class="flex gap-3">
-                    <a href="{{ route('games.present', $game) }}" target="friction-presentation"
-                       class="bg-purple-600 hover:bg-purple-700 px-4 py-2 rounded-lg font-medium transition">
-                        Open Presentation
-                    </a>
-                    <button wire:click="returnToSetup"
-                            class="bg-slate-700 hover:bg-slate-600 px-4 py-2 rounded-lg font-medium transition">
-                        Back to Setup
-                    </button>
-                </div>
-            </div>
+            <span class="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-2">ROUND {{ $game->current_round }} OF {{ $game->total_rounds }}</span>
         </div>
 
-        @if($game->status === 'completed')
-            <!-- Game Complete -->
-            <div class="bg-slate-800 rounded-xl p-8 text-center">
-                <h2 class="text-4xl font-bold mb-4">Game Complete!</h2>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 max-w-3xl mx-auto">
-                    @foreach($players->sortByDesc('total_score') as $index => $player)
-                        <div class="bg-slate-900 rounded-xl p-4 {{ $index === 0 ? 'ring-2 ring-yellow-500' : '' }}">
-                            <div class="text-lg font-bold" style="color: {{ $player->color }}">
-                                @if($index === 0) 👑 @endif
-                                {{ $player->name }}
+        <div class="flex items-center gap-4">
+            @if($game->join_code)
+                <div class="bg-slate-800/40 border border-white/5 rounded-xl px-4 py-2 flex items-center gap-3 shadow-inner">
+                    <span class="text-[10px] font-black uppercase tracking-widest text-slate-500">CODE</span>
+                    <span class="font-mono text-xl font-black text-blue-400 tracking-widest">{{ $game->join_code }}</span>
+                </div>
+            @endif
+            <a href="{{ route('games.present', $game) }}" target="friction-presentation"
+               class="bg-purple-600 border-b-4 border-purple-800 hover:bg-purple-700 text-white px-6 py-2.5 rounded-xl font-black uppercase tracking-widest text-xs transition-all active:translate-y-1 active:border-b-0">
+                Presentation
+            </a>
+            <button wire:click="returnToSetup"
+                    class="bg-slate-800 border-b-4 border-slate-900 hover:bg-slate-700 text-slate-300 px-6 py-2.5 rounded-xl font-black uppercase tracking-widest text-xs transition-all active:translate-y-1 active:border-b-0">
+                Exit to Setup
+            </button>
+        </div>
+    </div>
+
+    <main class="flex-1 p-4 grid lg:grid-cols-12 gap-4 max-w-[1600px] mx-auto w-full items-start">
+        <!-- Main Game Area -->
+        <div class="lg:col-span-8 xl:col-span-9 space-y-4 flex flex-col">
+            <div class="relative flex-1 min-h-[250px]">
+                @if($game->status === 'completed')
+                    <livewire:gm.completed-game :game="$game" />
+                @else
+                    @if($game->show_rules)
+                        <livewire:gm.rules-phase :game="$game" />
+                    @elseif($currentRound?->status === 'intro')
+                        <livewire:gm.intro-phase :game="$game" :currentRound="$currentRound" />
+                    @elseif($currentRound?->status === 'collecting')
+                        <livewire:gm.collecting-phase :game="$game" :currentRound="$currentRound" :key="'collect-'.$currentRound->id" />
+                    @elseif(in_array($currentRound?->status, ['revealing', 'friction']))
+                        <livewire:gm.revealing-phase :game="$game" :currentRound="$currentRound" :key="'reveal-'.$currentRound->id" />
+                    @elseif($currentRound?->status === 'scoring')
+                        <livewire:gm.scoring-phase :game="$game" :currentRound="$currentRound" :key="'score-'.$currentRound->id" />
+                    @endif
+                @endif
+            </div>
+
+            <!-- Horizontal Answer Reference Panel -->
+            @if($currentRound && in_array($currentRound->status, ['collecting', 'revealing', 'friction']))
+                <div class="bg-slate-900/50 rounded-[2rem] border border-white/5 p-5 backdrop-blur-xl shadow-2xl">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-[10px] font-black uppercase tracking-[0.2em] text-slate-500">CATEGORY: {{ $currentRound->category->title }}</h3>
+                        <div class="flex gap-4">
+                            <span class="text-[9px] font-black text-green-500 uppercase tracking-widest flex items-center gap-2">
+                                <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span> TOP 10
+                            </span>
+                            <span class="text-[9px] font-black text-red-500 uppercase tracking-widest flex items-center gap-2">
+                                <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span> FRICTION
+                            </span>
+                        </div>
+                    </div>
+                    <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-5 gap-2">
+                        @foreach($answers as $answer)
+                            <div class="bg-slate-800/40 rounded-xl px-3 py-2 border {{ $answer->is_friction ? 'border-red-900/20' : 'border-slate-700/50' }} group hover:border-slate-600 transition shadow-inner">
+                                <div class="flex items-center justify-between mb-0.5">
+                                    <span class="text-[9px] font-black text-slate-500 uppercase">#{{ $answer->position }}</span>
+                                    <span class="text-[9px] font-black {{ $answer->points > 0 ? 'text-green-500' : 'text-red-500' }}">{{ $answer->points > 0 ? '+' : '' }}{{ $answer->points }}</span>
+                                </div>
+                                <p class="text-[11px] font-black text-white uppercase tracking-tight truncate">{{ $answer->text }}</p>
                             </div>
-                            <div class="text-3xl font-bold mt-2">{{ $player->total_score }}</div>
+                        @endforeach
+                    </div>
+                </div>
+            @endif
+        </div>
+
+        <!-- Sidebar Area -->
+        <div class="lg:col-span-4 xl:col-span-3 space-y-8">
+            <!-- Scoreboard -->
+            <div class="bg-slate-900/50 rounded-[2.5rem] border border-white/5 shadow-2xl p-8 sticky top-28 backdrop-blur-xl">
+                <h3 class="text-xs font-black uppercase tracking-[0.2em] text-slate-500 mb-6 flex items-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"/></svg>
+                    Leaderboard
+                </h3>
+                
+                <div class="space-y-3">
+                    @foreach($activePlayers as $index => $player)
+                        <div class="flex items-center justify-between group bg-slate-800/40 rounded-2xl p-4 border border-slate-700/50 hover:border-slate-600 transition shadow-inner">
+                            <div class="flex items-center gap-3">
+                                <div class="w-6 h-6 rounded-lg bg-slate-700/30 border border-slate-700 flex items-center justify-center text-[10px] font-black text-slate-500 shadow-inner">
+                                    {{ $index + 1 }}
+                                </div>
+                                <div class="flex flex-col">
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-2.5 h-2.5 rounded-full shadow-[0_0_8px_rgba(255,255,255,0.1)]" style="background-color: {{ $player->color }}"></div>
+                                        <span class="text-sm font-black text-white uppercase tracking-tight">{{ $player->name }}</span>
+                                    </div>
+                                    @if($player->doublesRemaining() > 0)
+                                        <span class="text-[8px] font-black text-yellow-500 uppercase tracking-widest mt-0.5">{{ $player->doublesRemaining() }} DOUBLES REMAINING</span>
+                                    @endif
+                                </div>
+                            </div>
+                            <div class="flex items-center gap-2">
+                                <span class="text-xl font-black text-white tracking-tighter">{{ $player->total_score }}</span>
+                                <button wire:click="confirmRemovePlayer('{{ $player->id }}')" 
+                                        class="opacity-0 group-hover:opacity-100 text-slate-600 hover:text-red-500 transition px-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/></svg>
+                                </button>
+                            </div>
                         </div>
                     @endforeach
                 </div>
-            </div>
-        @else
-            <div class="grid lg:grid-cols-3 gap-6">
-                <!-- Main Control Panel -->
-                <div class="lg:col-span-2 space-y-6">
 
-                    {{-- RULES PHASE --}}
-                    @if($game->show_rules)
-                        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                            <div class="text-center">
-                                <h2 class="text-2xl font-bold mb-4">Showing Game Rules</h2>
-                                <p class="text-slate-400 mb-6">Players can see the rules on the presentation screen</p>
-                                <button wire:click="dismissRules"
-                                        class="bg-green-600 hover:bg-green-700 px-8 py-3 rounded-lg font-bold transition">
-                                    Continue to Round 1 →
-                                </button>
-                            </div>
-                        </div>
-
-                    {{-- INTRO PHASE --}}
-                    @elseif($currentRound?->status === 'intro')
-                        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                            <div class="text-center">
-                                <p class="text-slate-400 mb-2">Round {{ $game->current_round }}</p>
-                                <h2 class="text-3xl font-bold mb-2">{{ $currentRound->category->title }}</h2>
-                                @if($currentRound->category->description)
-                                    <p class="text-slate-400 mb-6">{{ $currentRound->category->description }}</p>
-                                @endif
-                                <button wire:click="startCollecting"
-                                        class="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg font-bold transition">
-                                    Start Collecting Answers →
-                                </button>
-                            </div>
-                        </div>
-
-                    {{-- COLLECTING PHASE --}}
-                    @elseif($currentRound?->status === 'collecting')
-                        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                            <div class="flex justify-between items-center mb-4">
-                                <h2 class="text-xl font-bold">Collect Player Answers</h2>
-                                <span class="text-sm px-3 py-1 rounded bg-blue-600/20 text-blue-400">
-                                    {{ $currentRound->category->title }}
-                                </span>
-                            </div>
-
-                            <!-- Turn Order Display -->
-                            <div class="mb-4 p-3 bg-slate-900 rounded-lg">
-                                <div class="flex items-center justify-between mb-2">
-                                    <span class="text-slate-400 text-sm">Answer Order (Round {{ $game->current_round }})</span>
-                                    @if($game->timer_running && $timerMode)
-                                        <span class="text-sm font-medium {{ $timerMode === 'countdown' ? 'text-yellow-400' : 'text-red-400' }}">
-                                            {{ $timerMode === 'countdown' ? 'Thinking Time' : 'Waiting...' }}
-                                        </span>
-                                    @endif
-                                </div>
-                                <div class="flex flex-wrap gap-2">
-                                    @foreach($turnOrder as $index => $p)
-                                        @php
-                                            $isCurrent = $currentTurnPlayer && $p->id === $currentTurnPlayer->id;
-                                            $isDisconnected = $p->isGmControlled() && !$p->isGmCreated();
-                                        @endphp
-                                        <div class="flex items-center gap-2 px-3 py-1.5 rounded-full text-sm
-                                                    {{ $isCurrent ? 'bg-blue-600 ring-2 ring-blue-400' : 'bg-slate-800 border border-slate-700' }}
-                                                    {{ $isDisconnected ? 'border-yellow-500/50' : '' }}">
-                                            <span class="font-bold {{ $isCurrent ? 'text-white' : 'text-slate-500' }}">{{ $index + 1 }}.</span>
-                                            <div class="w-2 h-2 rounded-full" style="background-color: {{ $p->color }}"></div>
-                                            <span style="color: {{ $p->color }}">{{ $p->name }}</span>
-                                            @if($isDisconnected)
-                                                <span class="text-xs text-yellow-400">⚠</span>
-                                            @endif
-                                            @if($isCurrent)
-                                                <span class="text-xs text-white">⬅</span>
-                                            @endif
-                                        </div>
-                                    @endforeach
-                                </div>
-                                @if($currentTurnPlayer)
-                                    <p class="text-slate-400 text-sm mt-2">
-                                        Waiting for: <span class="font-bold" style="color: {{ $currentTurnPlayer->color }}">{{ $currentTurnPlayer->name }}</span>
-                                    </p>
-                                @endif
-                            </div>
-
-                            <div class="space-y-4">
-                                @foreach($turnOrder as $player)
-                                    @php
-                                        $hasAnswer = !empty($playerAnswers[$player->id] ?? '');
-                                        $existingAnswer = $playerAnswerMap[$player->id] ?? null;
-                                        $isDisconnected = $player->isGmControlled() && !$player->isGmCreated();
-                                    @endphp
-                                    <div class="bg-slate-900 rounded-lg p-4 {{ $hasAnswer ? 'ring-1 ring-green-500/50' : '' }} {{ $isDisconnected ? 'ring-1 ring-yellow-500/50' : '' }}">
-                                        <div class="flex items-center gap-4">
-                                            <div class="w-4 h-4 rounded-full flex-shrink-0" style="background-color: {{ $player->color }}"></div>
-                                            <div class="font-bold text-lg flex-shrink-0 w-32" style="color: {{ $player->color }}">
-                                                {{ $player->name }}
-                                                @if($isDisconnected)
-                                                    <span class="text-xs text-yellow-400 font-normal">(disconnected)</span>
-                                                @endif
-                                            </div>
-
-                                            <div class="flex-1 flex items-center gap-2" x-data="{ open: false }">
-                                                <div class="relative flex-1">
-                                                    <input type="text"
-                                                           wire:model="playerAnswers.{{ $player->id }}"
-                                                           @focus="open = true"
-                                                           @blur="setTimeout(() => open = false, 200)"
-                                                           @keydown.enter="open = false; $wire.submitPlayerAnswer('{{ $player->id }}')"
-                                                           placeholder="Type answer..."
-                                                           class="w-full bg-slate-800 border border-slate-600 rounded-lg px-4 py-2 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
-
-                                                    <!-- Autocomplete dropdown -->
-                                                    <div x-show="open"
-                                                         x-cloak
-                                                         class="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-lg shadow-lg max-h-48 overflow-auto"
-                                                         x-data="{ input: '' }"
-                                                         x-effect="input = ($wire.playerAnswers['{{ $player->id }}'] || '').toLowerCase()">
-                                                        @foreach($answers as $answer)
-                                                            <button type="button"
-                                                                    x-show="input.length > 0 && '{{ strtolower(addslashes($answer->display_text)) }}'.includes(input)"
-                                                                    @click="$wire.set('playerAnswers.{{ $player->id }}', '{{ addslashes($answer->display_text) }}'); open = false; $wire.submitPlayerAnswer('{{ $player->id }}')"
-                                                                    class="w-full text-left px-4 py-2 hover:bg-slate-700 transition {{ $answer->is_friction ? 'text-red-400' : '' }}">
-                                                                <span class="text-slate-500 mr-2">#{{ $answer->position }}</span>
-                                                                {{ $answer->display_text }}
-                                                            </button>
-                                                        @endforeach
-                                                    </div>
-                                                </div>
-
-                                                @if($player->canUseDouble())
-                                                    <label class="flex items-center gap-1 cursor-pointer flex-shrink-0">
-                                                        <input type="checkbox" wire:model.live="playerDoubles.{{ $player->id }}" class="w-4 h-4 rounded">
-                                                        <span class="text-yellow-400 text-sm">{{ $game->double_multiplier }}x</span>
-                                                    </label>
-                                                @endif
-
-                                                <button wire:click="submitPlayerAnswer('{{ $player->id }}')"
-                                                        class="bg-slate-700 hover:bg-slate-600 px-3 py-2 rounded transition flex-shrink-0">
-                                                    Set
-                                                </button>
-                                            </div>
-
-                                            @if($existingAnswer)
-                                                <div class="flex-shrink-0 text-right">
-                                                    <span class="text-green-400">✓</span>
-                                                    <span class="text-slate-400 text-sm ml-1">{{ Str::limit($existingAnswer['answer_text'], 20) }}</span>
-                                                </div>
-                                            @endif
-
-                                            <!-- Remove button -->
-                                            <button wire:click="confirmRemovePlayer('{{ $player->id }}')"
-                                                    class="flex-shrink-0 text-red-400 hover:text-red-300 hover:bg-red-900/30 text-xs px-2 py-1 rounded transition"
-                                                    title="Remove player">
-                                                ✕
-                                            </button>
-                                        </div>
-                                    </div>
-                                @endforeach
-                            </div>
-
-                            <div class="mt-6 pt-4 border-t border-slate-700 flex justify-between items-center">
-                                <div class="flex items-center gap-4">
-                                    <button wire:click="goBackToIntro"
-                                            class="text-slate-400 hover:text-white transition">
-                                        ← Back to Intro
-                                    </button>
-                                    <span class="text-slate-400">
-                                        {{ count(array_filter($playerAnswers)) }} / {{ count($players) }} answers collected
-                                    </span>
-                                </div>
-                                <button wire:click="startRevealing"
-                                        @disabled(!$allAnswersCollected)
-                                        class="bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed px-8 py-3 rounded-lg font-bold transition">
-                                    Start Reveal →
-                                </button>
-                            </div>
-                        </div>
-
-                    {{-- REVEALING / FRICTION PHASE --}}
-                    @elseif(in_array($currentRound?->status, ['revealing', 'friction']))
-                        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                            <div class="flex justify-between items-center mb-6">
-                                <h2 class="text-xl font-bold">
-                                    @if($revealedCount <= $game->top_answers_count)
-                                        Revealing Top {{ $game->top_answers_count }}
-                                    @else
-                                        Revealing FRICTION Answers
-                                    @endif
-                                </h2>
-                                <span class="text-sm px-3 py-1 rounded {{ $revealedCount > $game->top_answers_count ? 'bg-red-600/20 text-red-400' : 'bg-green-600/20 text-green-400' }}">
-                                    {{ $revealedCount }} / {{ $answers->count() }} revealed
-                                </span>
-                            </div>
-
-                            <!-- Answers Grid -->
-                            <div class="grid grid-cols-2 gap-3 mb-6">
-                                @foreach($answers->take($game->top_answers_count) as $answer)
-                                    @php
-                                        $isRevealed = $answer->position <= $revealedCount;
-                                        $playersWithThis = collect($playerAnswerMap)->filter(fn($pa) => ($pa['answer']?->id ?? null) === $answer->id);
-                                    @endphp
-                                    <div class="bg-slate-900 rounded-lg p-3 {{ $isRevealed ? '' : 'opacity-40' }}">
-                                        <div class="flex justify-between items-start">
-                                            <div>
-                                                <span class="text-green-400 font-bold">#{{ $answer->position }}</span>
-                                                @if($isRevealed)
-                                                    <span class="ml-2">{{ $answer->text }}</span>
-                                                @else
-                                                    <span class="ml-2 text-slate-500">???</span>
-                                                @endif
-                                            </div>
-                                            <span class="text-green-400 font-bold">+{{ $answer->points }}</span>
-                                        </div>
-                                        @if($isRevealed && $playersWithThis->count() > 0)
-                                            <div class="mt-2 flex flex-wrap gap-1">
-                                                @foreach($playersWithThis as $playerId => $pa)
-                                                    <span class="text-xs px-2 py-0.5 rounded-full" style="background-color: {{ $players->find($playerId)?->color }}30; color: {{ $players->find($playerId)?->color }}">
-                                                        {{ $players->find($playerId)?->name }}
-                                                        @if($pa['was_doubled']) 2x @endif
-                                                    </span>
-                                                @endforeach
-                                            </div>
-                                        @endif
-                                    </div>
-                                @endforeach
-                            </div>
-
-                            @if($answers->count() > $game->top_answers_count)
-                                <h3 class="text-red-400 font-bold mb-3">FRICTION ZONE</h3>
-                                <div class="grid grid-cols-2 gap-3 mb-6">
-                                    @foreach($answers->skip($game->top_answers_count) as $answer)
-                                        @php
-                                            $isRevealed = $answer->position <= $revealedCount;
-                                            $playersWithThis = collect($playerAnswerMap)->filter(fn($pa) => ($pa['answer']?->id ?? null) === $answer->id);
-                                        @endphp
-                                        <div class="bg-red-900/30 border border-red-500/30 rounded-lg p-3 {{ $isRevealed ? '' : 'opacity-40' }}">
-                                            <div class="flex justify-between items-start">
-                                                <div>
-                                                    <span class="text-red-400 font-bold">#{{ $answer->position }}</span>
-                                                    @if($isRevealed)
-                                                        <span class="ml-2">{{ $answer->text }}</span>
-                                                    @else
-                                                        <span class="ml-2 text-slate-500">???</span>
-                                                    @endif
-                                                </div>
-                                                <span class="text-red-400 font-bold">{{ $answer->points }}</span>
-                                            </div>
-                                            @if($isRevealed && $playersWithThis->count() > 0)
-                                                <div class="mt-2 flex flex-wrap gap-1">
-                                                    @foreach($playersWithThis as $playerId => $pa)
-                                                        <span class="text-xs px-2 py-0.5 rounded-full" style="background-color: {{ $players->find($playerId)?->color }}30; color: {{ $players->find($playerId)?->color }}">
-                                                            {{ $players->find($playerId)?->name }}
-                                                            @if($pa['was_doubled']) 2x @endif
-                                                        </span>
-                                                    @endforeach
-                                                </div>
-                                            @endif
-                                        </div>
-                                    @endforeach
-                                </div>
-                            @endif
-
-                            <div class="flex justify-between items-center pt-4 border-t border-slate-700">
-                                <div class="flex items-center gap-4">
-                                    <button wire:click="goBackToCollecting"
-                                            class="text-slate-400 hover:text-white transition">
-                                        ← Back to Collecting
-                                    </button>
-                                    <button wire:click="revealAll"
-                                            class="text-slate-400 hover:text-white transition">
-                                        Reveal All
-                                    </button>
-                                </div>
-                                <div class="flex gap-3">
-                                    @if($revealedCount < $answers->count())
-                                        <button wire:click="revealNext"
-                                                class="bg-blue-600 hover:bg-blue-700 px-8 py-3 rounded-lg font-bold transition">
-                                            Reveal #{{ $revealedCount + 1 }} →
-                                        </button>
-                                    @else
-                                        <button wire:click="showScores"
-                                                class="bg-green-600 hover:bg-green-700 px-8 py-3 rounded-lg font-bold transition">
-                                            Show Scores →
-                                        </button>
-                                    @endif
-                                </div>
-                            </div>
-                        </div>
-
-                    {{-- SCORING PHASE --}}
-                    @elseif($currentRound?->status === 'scoring')
-                        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                            <h2 class="text-2xl font-bold text-center mb-6">Round {{ $game->current_round }} Complete!</h2>
-
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                                @foreach($players->sortByDesc('total_score') as $index => $player)
-                                    @php $pa = $playerAnswerMap[$player->id] ?? null; @endphp
-                                    <div class="bg-slate-900 rounded-xl p-4 {{ $index === 0 ? 'ring-2 ring-yellow-500' : '' }}">
-                                        <div class="text-lg font-bold" style="color: {{ $player->color }}">
-                                            {{ $player->name }}
-                                        </div>
-                                        <div class="text-3xl font-bold mt-2">{{ $player->total_score }}</div>
-                                        @if($pa)
-                                            <div class="text-sm text-slate-400 mt-2">
-                                                {{ $pa['answer_text'] }}
-                                                <span class="{{ $pa['points'] >= 0 ? 'text-green-400' : 'text-red-400' }}">
-                                                    ({{ $pa['points'] > 0 ? '+' : '' }}{{ $pa['points'] }}{{ $pa['was_doubled'] ? ' 2x' : '' }})
-                                                </span>
-                                            </div>
-                                        @endif
-                                    </div>
-                                @endforeach
-                            </div>
-
-                            <div class="flex justify-between items-center">
-                                <button wire:click="goBackToRevealing"
-                                        class="text-slate-400 hover:text-white transition">
-                                    ← Back to Revealing
-                                </button>
-                                <button wire:click="nextRound"
-                                        class="bg-green-600 hover:bg-green-700 px-8 py-3 rounded-lg font-bold transition">
-                                    @if($game->current_round >= $game->total_rounds)
-                                        Finish Game
-                                    @else
-                                        Next Round →
-                                    @endif
-                                </button>
-                            </div>
-                        </div>
-                    @endif
-
-                    <!-- Player Answers This Round -->
-                    @if($currentRound && count($playerAnswerMap) > 0 && !in_array($currentRound->status, ['intro', 'collecting']))
-                        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                            <h3 class="text-lg font-semibold mb-4">Player Answers This Round</h3>
-                            <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                                @foreach($players as $player)
-                                    @php $pa = $playerAnswerMap[$player->id] ?? null; @endphp
-                                    <div class="bg-slate-900 rounded-lg p-3" x-data="{ editing: false }">
-                                        <div class="font-bold text-sm" style="color: {{ $player->color }}">{{ $player->name }}</div>
-                                        @if($pa)
-                                            <div x-show="!editing">
-                                                <div class="text-slate-300 mt-1">{{ $pa['answer_text'] }}</div>
-                                                <div class="flex items-center justify-between mt-1">
-                                                    <span class="text-xs {{ $pa['points'] >= 0 ? 'text-green-400' : 'text-red-400' }}">
-                                                        {{ $pa['points'] > 0 ? '+' : '' }}{{ $pa['points'] }} pts
-                                                        @if($pa['was_doubled']) (2x) @endif
-                                                    </span>
-                                                    <button @click="editing = true" class="text-xs text-blue-400 hover:text-blue-300">Edit</button>
-                                                </div>
-                                            </div>
-                                            <div x-show="editing" x-cloak class="mt-1">
-                                                <select @change="$wire.correctAnswer('{{ $player->id }}', $event.target.value); editing = false"
-                                                        class="w-full text-xs bg-slate-800 border border-slate-600 rounded px-2 py-1 text-white">
-                                                    <option value="">Select correct answer...</option>
-                                                    @foreach($answers as $answer)
-                                                        <option value="{{ $answer->id }}" {{ $pa['answer']?->id === $answer->id ? 'selected' : '' }}>
-                                                            #{{ $answer->position }} {{ $answer->display_text }} ({{ $answer->points > 0 ? '+' : '' }}{{ $answer->points }})
-                                                        </option>
-                                                    @endforeach
-                                                </select>
-                                                <button @click="editing = false" class="text-xs text-slate-400 hover:text-slate-300 mt-1">Cancel</button>
-                                            </div>
-                                        @else
-                                            <div class="text-slate-500 mt-1">No answer</div>
-                                        @endif
-                                    </div>
-                                @endforeach
-                            </div>
-                        </div>
-                    @endif
-                </div>
-
-                <!-- Sidebar -->
-                <div class="space-y-6">
-                    <!-- GM Scoreboard (always visible to GM) -->
-                    <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                        <h2 class="text-lg font-semibold mb-4">Players (GM View)</h2>
-                        <div class="space-y-3">
-                            @foreach($players->sortByDesc('total_score') as $index => $player)
-                                <div class="flex items-center justify-between bg-slate-900 rounded-lg px-4 py-3 group">
-                                    <div class="flex items-center gap-3">
-                                        <span class="text-slate-500 font-bold w-6">{{ $index + 1 }}</span>
-                                        <div class="w-3 h-3 rounded-full" style="background-color: {{ $player->color }}"></div>
-                                        <span class="font-medium">{{ $player->name }}</span>
-                                        @if($player->isGmControlled() && !$player->isGmCreated())
-                                            <span class="text-xs text-yellow-400">⚠</span>
-                                        @endif
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <span class="text-xl font-bold">{{ $player->total_score }}</span>
-                                        @if($player->doublesRemaining() > 0)
-                                            <span class="text-xs bg-yellow-500/20 text-yellow-400 px-1.5 py-0.5 rounded">{{ $game->double_multiplier }}x{{ $player->doublesRemaining() > 1 ? ' ×' . $player->doublesRemaining() : '' }}</span>
-                                        @endif
-                                        <!-- Remove button (hidden until hover) -->
-                                        <button wire:click="confirmRemovePlayer('{{ $player->id }}')"
-                                                class="opacity-0 group-hover:opacity-100 text-red-400 hover:text-red-300 text-xs ml-2 transition">
-                                            ✕
-                                        </button>
-                                    </div>
+                @if($removedPlayers->count() > 0)
+                    <div class="mt-8 pt-6 border-t border-slate-800/50">
+                        <h4 class="text-[10px] font-black uppercase tracking-widest text-slate-600 mb-3">On Sideline</h4>
+                        <div class="space-y-2">
+                            @foreach($removedPlayers as $player)
+                                <div class="flex items-center justify-between py-2 px-3 rounded-xl bg-slate-800/20 opacity-50 grayscale group hover:grayscale-0 hover:opacity-100 transition duration-300 border border-transparent hover:border-slate-700">
+                                    <span class="text-xs font-black uppercase text-slate-400 line-through">{{ $player->name }}</span>
+                                    <button wire:click="restorePlayer('{{ $player->id }}')" class="text-[10px] font-black uppercase text-blue-500 hover:text-blue-400">Restore</button>
                                 </div>
                             @endforeach
                         </div>
-
-                        <!-- Removed Players -->
-                        @if($removedPlayers->count() > 0)
-                            <div class="mt-4 pt-4 border-t border-slate-700">
-                                <h3 class="text-sm text-slate-400 mb-2">Removed Players</h3>
-                                <div class="space-y-2">
-                                    @foreach($removedPlayers as $player)
-                                        <div class="flex items-center justify-between bg-slate-900/50 rounded-lg px-4 py-2 opacity-60">
-                                            <div class="flex items-center gap-3">
-                                                <div class="w-3 h-3 rounded-full" style="background-color: {{ $player->color }}"></div>
-                                                <span class="font-medium line-through">{{ $player->name }}</span>
-                                            </div>
-                                            <button wire:click="restorePlayer('{{ $player->id }}')"
-                                                    class="text-xs text-green-400 hover:text-green-300">
-                                                Restore
-                                            </button>
-                                        </div>
-                                    @endforeach
-                                </div>
-                            </div>
-                        @endif
                     </div>
-
-                    <!-- Round Progress -->
-                    <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                        <h3 class="text-sm text-slate-400 mb-2">Round Progress</h3>
-                        <div class="flex gap-1">
-                            @for($i = 1; $i <= $game->total_rounds; $i++)
-                                <div class="flex-1 h-2 rounded-full
-                                    @if($i < $game->current_round) bg-green-500
-                                    @elseif($i === $game->current_round) bg-blue-500
-                                    @else bg-slate-700
-                                    @endif
-                                "></div>
-                            @endfor
-                        </div>
-                    </div>
-
-                    <!-- Category Reference (GM only - shows full text) -->
-                    @if($currentRound && in_array($currentRound->status, ['collecting', 'revealing', 'friction']))
-                        <div class="bg-slate-800 rounded-xl p-6 border border-slate-700">
-                            <h3 class="text-sm text-slate-400 mb-2">Answer Reference</h3>
-                            <div class="space-y-1 text-sm max-h-64 overflow-auto">
-                                @foreach($answers as $answer)
-                                    <div class="flex justify-between {{ $answer->is_friction ? 'text-red-400' : 'text-slate-300' }}">
-                                        <span>#{{ $answer->position }} {{ $answer->text }}</span>
-                                        <span>{{ $answer->points > 0 ? '+' : '' }}{{ $answer->points }}</span>
-                                    </div>
-                                @endforeach
-                            </div>
-                        </div>
-                    @endif
-                </div>
+                @endif
             </div>
-        @endif
-    </div>
+        </div>
+    </main>
 
-    <!-- Remove Player Confirmation Modal -->
+    <!-- Remove Player Modal -->
     @if($confirmingRemovePlayerId)
-        @php $playerToRemove = $players->firstWhere('id', $confirmingRemovePlayerId) ?? $removedPlayers->firstWhere('id', $confirmingRemovePlayerId); @endphp
+        @php $playerToRemove = Player::find($confirmingRemovePlayerId); @endphp
         @if($playerToRemove)
-            <div class="fixed inset-0 z-50 overflow-y-auto" aria-modal="true">
-                <div class="flex min-h-screen items-center justify-center p-4">
-                    <div class="fixed inset-0 bg-black/70 transition-opacity" wire:click="cancelRemovePlayer"></div>
-
-                    <div class="relative bg-slate-800 rounded-xl shadow-xl w-full max-w-sm border border-slate-700">
-                        <div class="px-6 py-4 border-b border-slate-700 flex justify-between items-center">
-                            <h3 class="text-lg font-bold text-red-400">Remove Player</h3>
-                            <button wire:click="cancelRemovePlayer" class="text-slate-400 hover:text-white text-2xl">&times;</button>
-                        </div>
-
-                        <div class="p-6">
-                            <div class="flex items-center gap-3 mb-4">
-                                <div class="w-4 h-4 rounded-full" style="background-color: {{ $playerToRemove->color }}"></div>
-                                <span class="font-bold text-lg" style="color: {{ $playerToRemove->color }}">{{ $playerToRemove->name }}</span>
-                            </div>
-                            <p class="text-slate-300 mb-2">
-                                Remove this player from the game?
-                            </p>
-                            <p class="text-slate-400 text-sm mb-6">
-                                They will no longer appear in the turn order or scoring. You can restore them later if needed.
-                            </p>
-
-                            <div class="flex justify-end gap-3">
-                                <button wire:click="cancelRemovePlayer"
-                                        class="px-4 py-2 text-slate-400 hover:text-white transition">
-                                    Cancel
-                                </button>
-                                <button wire:click="removePlayer"
-                                        class="px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-medium transition">
-                                    Remove Player
-                                </button>
-                            </div>
-                        </div>
+            <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
+                <div class="fixed inset-0 bg-slate-900/90 backdrop-blur-xl transition-opacity" wire:click="cancelRemovePlayer"></div>
+                <div class="relative bg-slate-800 rounded-[3rem] shadow-2xl w-full max-w-md border border-white/5 p-12 text-center overflow-hidden">
+                    <div class="absolute -top-10 -right-10 w-40 h-40 bg-red-600/10 blur-[60px] rounded-full"></div>
+                    
+                    <div class="w-24 h-24 bg-red-600/10 rounded-full flex items-center justify-center mx-auto mb-8 border-2 border-red-600/20 relative z-10">
+                        <svg class="w-12 h-12 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+                    </div>
+                    
+                    <h3 class="text-3xl font-black text-white mb-4 uppercase tracking-tighter leading-none">REMOVE PLAYER?</h3>
+                    <p class="text-slate-400 mb-10 text-sm font-bold uppercase tracking-widest leading-relaxed">
+                        TEMPORARILY KICK <span class="text-white font-black" style="color: {{ $playerToRemove->color }}">{{ $playerToRemove->name }}</span> FROM THE GAME?
+                    </p>
+                    
+                    <div class="flex flex-col gap-4 relative z-10">
+                        <button wire:click="removePlayer" class="w-full bg-red-600 border-b-8 border-red-800 hover:bg-red-500 text-white py-5 rounded-2xl font-black uppercase tracking-widest transition-all active:translate-y-1 active:border-b-0 shadow-2xl shadow-red-600/20">Remove Now</button>
+                        <button wire:click="cancelRemovePlayer" class="w-full py-4 text-slate-600 font-black uppercase tracking-widest text-[10px] hover:text-white transition">Cancel Action</button>
                     </div>
                 </div>
             </div>
@@ -1001,43 +357,24 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
     <script data-navigate-track>
         (function() {
             const gameId = '{{ $game->id }}';
-            const channelName = 'friction-game-' + gameId;
-
-            // Close any existing channel for this game
-            if (window.frictionChannel) {
-                window.frictionChannel.close();
-            }
-
-            const channel = new BroadcastChannel(channelName);
+            const channel = new BroadcastChannel('friction-game-' + gameId);
             window.frictionChannel = channel;
-            console.log('[Control] BroadcastChannel initialized for game:', gameId);
-
-            // Listen for Livewire 3 dispatched events
+            
             document.addEventListener('game-state-updated', function(event) {
                 const state = event.detail.state || event.detail;
-                console.log('[Control] Broadcasting state:', state);
                 channel.postMessage(state);
             });
 
             channel.onmessage = function(event) {
-                console.log('[Control] Received message:', event.data);
                 if (event.data && event.data.type === 'request-state') {
-                    console.log('[Control] Presentation requested state, triggering refresh...');
-                    // Find the Livewire component and call broadcastState
                     const component = Livewire.all()[0];
-                    if (component) {
-                        component.$wire.handleBroadcastState();
-                    }
+                    if (component) component.$wire.handleBroadcastState();
                 }
             };
 
-            // Broadcast initial state after a short delay
             setTimeout(function() {
-                console.log('[Control] Sending initial broadcast');
                 const component = Livewire.all()[0];
-                if (component) {
-                    component.$wire.handleBroadcastState();
-                }
+                if (component) component.$wire.handleBroadcastState();
             }, 500);
         })();
     </script>
