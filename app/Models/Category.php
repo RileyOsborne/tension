@@ -7,17 +7,24 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+/**
+ * @property string $id
+ * @property string $topic_id
+ * @property string $title
+ * @property string|null $description
+ * @property-read \App\Models\Topic $topic
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Answer> $answers
+ */
 class Category extends Model
 {
     use HasFactory, HasUlids, SoftDeletes;
 
     protected $fillable = [
+        'topic_id',
         'title',
         'description',
-        'topic_id',
         'played_at',
         'is_starter',
     ];
@@ -27,43 +34,19 @@ class Category extends Model
         'is_starter' => 'boolean',
     ];
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\Topic, $this>
+     */
     public function topic(): BelongsTo
     {
         return $this->belongsTo(Topic::class);
     }
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Answer, $this>
+     */
     public function answers(): HasMany
     {
         return $this->hasMany(Answer::class)->orderBy('position');
-    }
-
-    public function topTenAnswers(): HasMany
-    {
-        return $this->answers()->where('is_friction', false);
-    }
-
-    public function frictionAnswers(): HasMany
-    {
-        return $this->answers()->where('is_friction', true);
-    }
-
-    public function rounds(): HasMany
-    {
-        return $this->hasMany(Round::class);
-    }
-
-    /**
-     * Check if category has enough answers to be used.
-     *
-     * @param int $minAnswers Minimum required answers (defaults to 10)
-     */
-    public function isComplete(int $minAnswers = 10): bool
-    {
-        return $this->answers()->count() >= $minAnswers;
-    }
-
-    public function frictionCount(): int
-    {
-        return $this->frictionAnswers()->count();
     }
 }

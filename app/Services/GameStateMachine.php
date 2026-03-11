@@ -388,7 +388,7 @@ class GameStateMachine
             'player_id' => $playerId,
             'answer_id' => $answer?->id,
             'input_text' => $answerText,
-            'points_awarded' => $points,
+            'points_awarded' => (int) $points,
             'was_doubled' => $useDouble && $player->canUseDouble(),
         ]);
 

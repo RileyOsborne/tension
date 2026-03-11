@@ -6,8 +6,18 @@ use Illuminate\Database\Eloquent\Concerns\HasUlids;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property string $id
+ * @property string $category_id
+ * @property string $text
+ * @property string|null $stat
+ * @property int $position
+ * @property-read \App\Models\Category $category
+ * @property-read string $display_text
+ * @property-read int $points
+ * @property-read bool $is_friction
+ */
 class Answer extends Model
 {
     use HasFactory, HasUlids;
@@ -17,50 +27,43 @@ class Answer extends Model
         'text',
         'stat',
         'position',
-        'is_friction',
-        'points',
     ];
 
     protected $casts = [
         'position' => 'integer',
-        'is_friction' => 'boolean',
-        'points' => 'integer',
     ];
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\Category, $this>
+     */
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
     }
 
-    public function playerAnswers(): HasMany
-    {
-        return $this->hasMany(PlayerAnswer::class);
-    }
-
     /**
-     * Get the display text for GM input, hiding geographic identifiers.
-     * E.g., "Great Wall of China, China" becomes "Great Wall of China"
-     * E.g., "Mount Rushmore, South Dakota, USA" becomes "Mount Rushmore"
+     * Get the display text for this answer.
      */
     public function getDisplayTextAttribute(): string
     {
-        // Split by comma and only show the first part (the main answer)
-        $parts = explode(',', $this->text);
-        return trim($parts[0]);
+        return $this->text;
     }
 
-    public static function booted(): void
+    /**
+     * Get the points for this answer based on its position.
+     */
+    public function getPointsAttribute(): int
     {
-        static::creating(function (Answer $answer) {
-            // Auto-calculate is_friction and points based on position
-            $answer->is_friction = $answer->position > 10;
-            $answer->points = $answer->is_friction ? -5 : $answer->position;
-        });
+        return $this->position;
+    }
 
-        static::updating(function (Answer $answer) {
-            // Recalculate on update
-            $answer->is_friction = $answer->position > 10;
-            $answer->points = $answer->is_friction ? -5 : $answer->position;
-        });
+    /**
+     * Determine if this answer is a friction answer.
+     */
+    public function getIsFrictionAttribute(): bool
+    {
+        // Default to anything above 10 being friction, 
+        // but this usually depends on game config.
+        return $this->position > 10;
     }
 }

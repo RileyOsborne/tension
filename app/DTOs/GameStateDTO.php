@@ -78,7 +78,7 @@ class GameStateDTO
                     'playerId' => $pa->player_id,
                     'playerName' => $pa->player->name,
                     'playerColor' => $pa->player->color,
-                    'answerText' => $pa->input_text ?? ($pa->answer?->text ?? 'Not on list'),
+                    'answerText' => $pa->input_text ?? ($pa->answer->text ?? 'Not on list'),
                     'isOnList' => $pa->answer_id !== null,
                 ];
             }
@@ -96,7 +96,7 @@ class GameStateDTO
             show_rules: (bool) $game->show_rules,
             current_round: $game->current_round,
             round_status: $round?->status,
-            current_slide: $round?->current_slide ?? 0,
+            current_slide: $round->current_slide ?? 0,
             game_status: $game->status,
             join_code: $game->join_code,
             player_count: $game->player_count,

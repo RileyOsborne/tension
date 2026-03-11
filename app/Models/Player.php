@@ -9,6 +9,19 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property string $id
+ * @property string $game_id
+ * @property string $name
+ * @property string $color
+ * @property int $position
+ * @property int $total_score
+ * @property bool $double_used
+ * @property \Illuminate\Support\Carbon|null $removed_at
+ * @property-read \App\Models\Game $game
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\PlayerAnswer> $playerAnswers
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\PlayerSession> $sessions
+ */
 class Player extends Model
 {
     use HasFactory, HasUlids;
@@ -29,16 +42,25 @@ class Player extends Model
         'removed_at' => 'datetime',
     ];
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\Game, $this>
+     */
     public function game(): BelongsTo
     {
         return $this->belongsTo(Game::class);
     }
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\PlayerAnswer, $this>
+     */
     public function playerAnswers(): HasMany
     {
         return $this->hasMany(PlayerAnswer::class);
     }
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\PlayerSession, $this>
+     */
     public function sessions(): HasMany
     {
         return $this->hasMany(PlayerSession::class);

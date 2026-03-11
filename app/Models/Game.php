@@ -8,6 +8,29 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
+/**
+ * @property string $id
+ * @property string $name
+ * @property int $player_count
+ * @property int $total_rounds
+ * @property int $current_round
+ * @property string $status
+ * @property string $join_code
+ * @property int $thinking_time
+ * @property string $join_mode
+ * @property bool $timer_running
+ * @property \Illuminate\Support\Carbon|null $timer_started_at
+ * @property bool $show_rules
+ * @property int $top_answers_count
+ * @property int $friction_penalty
+ * @property int $not_on_list_penalty
+ * @property int $rounds_per_player
+ * @property int $double_multiplier
+ * @property int $doubles_per_player
+ * @property int $max_answers_per_category
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Player> $players
+ * @property-read \Illuminate\Database\Eloquent\Collection<int, \App\Models\Round> $rounds
+ */
 class Game extends Model
 {
     use HasFactory, HasUlids;
@@ -52,11 +75,17 @@ class Game extends Model
         'max_answers_per_category' => 'integer',
     ];
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Player, $this>
+     */
     public function players(): HasMany
     {
         return $this->hasMany(Player::class);
     }
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Round, $this>
+     */
     public function rounds(): HasMany
     {
         return $this->hasMany(Round::class)->orderBy('round_number');
@@ -64,9 +93,14 @@ class Game extends Model
 
     public function currentRoundModel(): ?Round
     {
-        return $this->rounds()->where('round_number', $this->current_round)->first();
+        /** @var Round|null $round */
+        $round = $this->rounds()->where('round_number', $this->current_round)->first();
+        return $round;
     }
 
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\PlayerSession, $this>
+     */
     public function playerSessions(): HasMany
     {
         return $this->hasMany(PlayerSession::class);
