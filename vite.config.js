@@ -19,7 +19,7 @@ function getNetworkIp() {
 }
 
 const networkIp = getNetworkIp();
-const hmrHost = process.env.VITE_HMR_HOST || networkIp;
+const hmrHost = process.env.VITE_HMR_HOST || 'localhost'; // Default to localhost for reliability
 
 export default defineConfig({
     plugins: [

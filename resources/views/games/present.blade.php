@@ -306,8 +306,32 @@
             'gameStatus' => $game->status,
             'joinCode' => $game->join_code,
             'playerCount' => $game->player_count,
-            'revealedAnswers' => [],
-            'collectedAnswers' => [],
+            'revealedAnswers' => $currentRound?->status === 'revealing' || $currentRound?->status === 'friction' || $currentRound?->status === 'scoring'
+                ? $currentRound->category->answers
+                    ->where('position', '<=', $currentRound->current_slide)
+                    ->map(fn($a) => [
+                        'position' => $a->position,
+                        'text' => $a->display_text,
+                        'stat' => $a->stat,
+                        'points' => $a->points,
+                        'is_friction' => $a->is_friction,
+                        'players' => $currentRound->playerAnswers
+                            ->filter(fn($pa) => $pa->answer_id === $a->id)
+                            ->map(fn($pa) => [
+                                'id' => $pa->player_id,
+                                'name' => $pa->player->name,
+                                'color' => $pa->player->color,
+                                'doubled' => (bool) $pa->was_doubled,
+                            ])->values()->toArray(),
+                    ])->values()->toArray()
+                : [],
+            'collectedAnswers' => $currentRound?->playerAnswers->map(fn($pa) => [
+                'playerId' => $pa->player_id,
+                'playerName' => $pa->player->name,
+                'playerColor' => $pa->player->color,
+                'answerText' => $pa->input_text,
+                'submitted' => true,
+            ])->values()->toArray(),
             'turnOrder' => [],
             'timerRunning' => (bool) $game->timer_running,
             'timerStartedAt' => $game->timer_started_at?->timestamp,
@@ -834,11 +858,13 @@
                 return;
             }
 
-            var category = categories[state.currentRound];
+            var roundNum = state.currentRound;
+            var category = categories[roundNum] || categories[String(roundNum)];
+            
             if (!category) {
-                console.log('No category found for round', state.currentRound, '- showing lobby');
+                console.log('[Present] No category found for round:', roundNum, 'Keys in categories:', Object.keys(categories));
                 showSlide('lobby');
-                scoreboardOverlay.classList.add('hidden');
+                if (scoreboardOverlay) scoreboardOverlay.classList.add('hidden');
                 return;
             }
 
@@ -897,86 +923,91 @@
         var isGameActive = initialState.gameStatus === 'playing';
         var pollingInterval = null;
 
-        // Listen for updates from control tab
-        channel.onmessage = function(event) {
-            console.log('[Present] RECEIVED MESSAGE FROM CHANNEL:', event.data);
-            if (event.data && event.data.type === 'request-state') return;
+        // Use a test mode flag to disable real-time communication during Dusk tests
+        const urlParams = new URLSearchParams(window.location.search);
+        const isTestMode = urlParams.has('dusk_test');
+        console.log('[Present] Test mode:', isTestMode);
 
-            // Handle reset - reload the page to get fresh state
-            if (event.data && event.data.type === 'reset') {
-                console.log('[Present] GAME RESET - Reloading page');
-                window.location.reload();
-                return;
-            }
+        if (!isTestMode) {
+            // Listen for updates from control tab
+            channel.onmessage = function(event) {
+                console.log('[Present] RECEIVED MESSAGE FROM CHANNEL:', event.data);
+                if (event.data && event.data.type === 'request-state') return;
 
-            // Handle game deleted via BroadcastChannel
-            if (event.data && event.data.type === 'deleted') {
-                console.log('[Present] GAME DELETED via BroadcastChannel');
-                showGameNotFound();
-                return;
-            }
+                // Handle reset - reload the page to get fresh state
+                if (event.data && event.data.type === 'reset') {
+                    console.log('[Present] GAME RESET - Reloading page');
+                    window.location.reload();
+                    return;
+                }
 
-            // Stop polling once game becomes active
-            if (event.data && event.data.gameStatus === 'playing' && !isGameActive) {
-                isGameActive = true;
-                if (pollingInterval) {
-                    console.log('[Present] Game started, stopping polling');
-                    clearInterval(pollingInterval);
-                    pollingInterval = null;
+                // Handle game deleted via BroadcastChannel
+                if (event.data && event.data.type === 'deleted') {
+                    console.log('[Present] GAME DELETED via BroadcastChannel');
+                    showGameNotFound();
+                    return;
+                }
+
+                // Stop polling once game becomes active
+                if (event.data && event.data.gameStatus === 'playing' && !isGameActive) {
+                    isGameActive = true;
+                    if (pollingInterval) {
+                        console.log('[Present] Game started, stopping polling');
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                    }
+                }
+
+                handleStateUpdate(event.data);
+            };
+
+            // Listen for game deletion via WebSocket (Echo/Reverb)
+            // Retry until Echo is available (it loads asynchronously)
+            function setupEchoListener() {
+                if (window.Echo) {
+                    window.Echo.channel('game.' + gameId)
+                        .listen('.game.deleted', function(data) {
+                            console.log('[Present] Game deleted event received:', data);
+                            showGameNotFound();
+                        });
+                    console.log('[Present] Echo listener initialized for game deletion');
+                } else {
+                    // Echo not ready yet, retry in 100ms
+                    setTimeout(setupEchoListener, 100);
                 }
             }
-
-            handleStateUpdate(event.data);
-        };
-
-        console.log('[Present] BroadcastChannel initialized for game:', gameId);
-
-        // Redirect to game not found page
-        function showGameNotFound() {
-            // Stop any polling
-            if (pollingInterval) {
-                clearInterval(pollingInterval);
-                pollingInterval = null;
-            }
-            window.location.href = '/present/' + gameId + '/not-found';
+            setupEchoListener();
+        } else {
+            console.log('[Present] Real-time communication disabled in test mode');
         }
-
-        // Listen for game deletion via WebSocket (Echo/Reverb)
-        // Retry until Echo is available (it loads asynchronously)
-        function setupEchoListener() {
-            if (window.Echo) {
-                window.Echo.channel('game.' + gameId)
-                    .listen('.game.deleted', function(data) {
-                        console.log('[Present] Game deleted event received:', data);
-                        showGameNotFound();
-                    });
-                console.log('[Present] Echo listener initialized for game deletion');
-            } else {
-                // Echo not ready yet, retry in 100ms
-                setTimeout(setupEchoListener, 100);
-            }
-        }
-        setupEchoListener();
-
-        // Always start with lobby view - control panel will push actual state if game is active
-        var lobbyState = {
-            gameId: initialState.gameId,
-            gameStatus: 'draft', // Force lobby view
-            joinCode: initialState.joinCode,
-            playerCount: initialState.playerCount,
-            players: initialState.players
-        };
-        console.log('[Present] Starting with lobby state:', lobbyState);
-        handleStateUpdate(lobbyState);
 
         // Request current state from control tab (if control panel is open, it will respond)
-        channel.postMessage({ type: 'request-state' });
+        if (!isTestMode) {
+            channel.postMessage({ type: 'request-state' });
+        }
 
         // Only poll while waiting for game to start
         if (!isGameActive) {
             pollingInterval = setInterval(function() {
                 channel.postMessage({ type: 'request-state' });
             }, 2000);
+        }
+
+        // Start with initial state if the game is already playing or completed
+        if (initialState.gameStatus === 'playing' || initialState.gameStatus === 'completed') {
+            console.log('[Present] Starting with initial state:', initialState);
+            handleStateUpdate(initialState);
+        } else {
+            // Otherwise start with lobby view
+            var lobbyState = {
+                gameId: initialState.gameId,
+                gameStatus: 'draft', // Force lobby view
+                joinCode: initialState.joinCode,
+                playerCount: initialState.playerCount,
+                players: initialState.players
+            };
+            console.log('[Present] Starting with lobby state:', lobbyState);
+            handleStateUpdate(lobbyState);
         }
     </script>
 </x-layouts.presentation>

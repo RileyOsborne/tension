@@ -29,23 +29,30 @@ class DesignGalleryTest extends DuskTestCase
 
         $game = Game::where('join_code', $joinCode)->firstOrFail();
         $round = $game->rounds()->where('round_number', 1)->firstOrFail();
+        $player = $game->players()->where('name', 'RILEY')->firstOrFail();
 
-        $this->browse(function (Browser $gm, Browser $present, Browser $playerBrowser) use ($game, $round, $joinCode) {
+        $this->browse(function (Browser $gm, Browser $present, Browser $playerBrowser) use ($game, $round, $player) {
             
-            // 1. Initial Join Flow (Captures authentic Join/Select views)
+            // 1. Join flow for Player
             $playerBrowser->resize(390, 844)
                 ->visit(route('player.join', [], false))
-                ->pause(1000)
-                ->type('join_code', $joinCode)
+                ->type('join_code', $game->join_code)
                 ->press('Join Game')
-                ->waitForRoute('player.select', [$joinCode])
-                ->pause(1000)
-                ->press('RILEY') // Select the first player
+                ->waitForRoute('player.select', [$game->join_code])
+                ->waitForText($player->name)
+                ->pause(500)
+                ->press($player->name)
                 ->waitForRoute('player.play', [$game->id])
-                ->pause(500);
+                ->pause(1000);
 
             $gmPath = route('games.control', $game, false);
-            $presentPath = route('games.present', $game, false);
+            $presentPath = route('games.present', [$game, 'dusk_test' => 1], false);
+
+            // Ensure game is in correct state for gallery capture
+            $game->update([
+                'status' => 'playing',
+                'show_rules' => false,
+            ]);
 
             $phases = [
                 RoundStatus::Intro->value,
@@ -59,8 +66,9 @@ class DesignGalleryTest extends DuskTestCase
             foreach ($phases as $index => $status) {
                 // Update State
                 $round->update(['status' => $status]);
-                if ($status === RoundStatus::Collecting->value) {
-                    $game->update(['status' => 'playing']);
+                
+                if ($status === RoundStatus::Complete->value) {
+                    $game->update(['status' => 'completed']);
                 }
 
                 if ($status === RoundStatus::Revealing->value || $status === RoundStatus::Friction->value) {
@@ -68,10 +76,25 @@ class DesignGalleryTest extends DuskTestCase
                 }
 
                 // --- GM VIEW ---
-                $gm->resize(1440, 900)->visit($gmPath)->pause(500)->screenshot("gallery/GM_{$index}_{$status}");
+                $gm->resize(1440, 900)->visit($gmPath)->pause(1000)->screenshot("gallery/GM_{$index}_{$status}");
 
                 // --- PRESENTATION VIEW ---
-                $present->resize(1920, 1080)->visit($presentPath)->pause(1000)->screenshot("gallery/PRESENT_{$index}_{$status}");
+                $present->resize(1920, 1080)->visit($presentPath);
+                
+                $selector = match($status) {
+                    RoundStatus::Intro->value => '#slide-intro:not(.hidden)',
+                    RoundStatus::Collecting->value => '#slide-collecting:not(.hidden)',
+                    RoundStatus::Revealing->value, RoundStatus::Friction->value => '#slide-reveal:not(.hidden)',
+                    RoundStatus::Scoring->value => '#slide-scores:not(.hidden)',
+                    RoundStatus::Complete->value => '#slide-gameover:not(.hidden)',
+                    default => null
+                };
+                
+                if ($selector) {
+                    $present->waitFor($selector, 10);
+                }
+                
+                $present->pause(500)->screenshot("gallery/PRESENT_{$index}_{$status}");
 
                 // --- PLAYER VIEW ---
                 $playerBrowser->visit(route('player.play', $game, false))->pause(500)->screenshot("gallery/PLAYER_{$index}_{$status}");

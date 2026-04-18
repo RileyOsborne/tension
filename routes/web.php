@@ -29,7 +29,7 @@ Volt::route('/games/{game}/control', 'pages.games.control')->name('games.control
 
 // Presentation view (regular Blade, not Livewire - it's all JavaScript)
 Route::get('/games/{game}/present', function (\App\Models\Game $game) {
-    $game->load(['players', 'rounds.category.answers']);
+    $game->load(['players', 'rounds.category.answers', 'rounds.playerAnswers.player']);
     return view('games.present', compact('game'));
 })->name('games.present')
   ->missing(fn() => response()->view('games.present-not-found'));
