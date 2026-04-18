@@ -62,6 +62,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
 
     public function mount(Game $game): void
     {
+        abort_unless($game->user_id === auth()->id(), 403);
         $this->game = $game->load(['players', 'rounds.category.answers']);
         $this->loadCurrentState();
     }
@@ -159,8 +160,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
         $playerId = $playerId ?? $this->confirmingRemovePlayerId;
         $this->confirmingRemovePlayerId = null;
 
-        $player = Player::find($playerId);
-        if ($player && $player->game_id === $this->game->id) {
+        $player = $this->game->players()->find($playerId);
+        if ($player) {
             $player->update(['removed_at' => now()]);
             $this->refreshAll();
         }
@@ -168,8 +169,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
 
     public function restorePlayer(string $playerId): void
     {
-        $player = Player::find($playerId);
-        if ($player && $player->game_id === $this->game->id) {
+        $player = $this->game->players()->find($playerId);
+        if ($player) {
             $player->update(['removed_at' => null]);
             $this->refreshAll();
         }
@@ -329,7 +330,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Master Control')] class ex
 
     <!-- Remove Player Modal -->
     @if($confirmingRemovePlayerId)
-        @php $playerToRemove = Player::find($confirmingRemovePlayerId); @endphp
+        @php $playerToRemove = $this->game->players()->find($confirmingRemovePlayerId); @endphp
         @if($playerToRemove)
             <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
                 <div class="fixed inset-0 bg-slate-900/90 backdrop-blur-xl transition-opacity" wire:click="cancelRemovePlayer"></div>

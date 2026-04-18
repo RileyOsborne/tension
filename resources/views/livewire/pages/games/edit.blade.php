@@ -12,6 +12,7 @@ new #[Layout('components.layouts.app')] #[Title('Edit Game')] class extends Comp
 
     public function mount(Game $game): void
     {
+        abort_unless($game->user_id === auth()->id(), 403);
         $this->game = $game;
         $this->name = $game->name;
         $this->playerCount = $game->player_count;

@@ -9,6 +9,7 @@ new #[Layout('components.layouts.app')] class extends Component {
 
     public function mount(Category $category): void
     {
+        abort_unless($category->user_id === auth()->id(), 403);
         $this->category = $category->load(['topic', 'answers']);
     }
 

@@ -12,16 +12,19 @@ class StarterPackSeeder extends Seeder
     /**
      * Seed the starter pack categories.
      */
-    public function run(): void
+    public function run(?int $userId = null): void
     {
         $data = require database_path('data/starter-pack.php');
 
         foreach ($data['categories'] as $catData) {
-            // Find or create topic (topics are shared)
+            // Find or create topic
             $topicId = null;
             if (!empty($catData['topic'])) {
                 $topic = Topic::withTrashed()->updateOrCreate(
-                    ['name' => $catData['topic']],
+                    [
+                        'name' => $catData['topic'],
+                        'user_id' => $userId,
+                    ],
                     ['deleted_at' => null]
                 );
                 $topicId = $topic->id;
@@ -29,7 +32,10 @@ class StarterPackSeeder extends Seeder
 
             // Create or restore category
             $category = Category::withTrashed()->updateOrCreate(
-                ['title' => $catData['title']],
+                [
+                    'title' => $catData['title'],
+                    'user_id' => $userId,
+                ],
                 [
                     'description' => $catData['description'] ?? null,
                     'topic_id' => $topicId,

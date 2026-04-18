@@ -93,7 +93,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     public function restoreTopic(): void
     {
         if (!$this->topicToRestore) return;
-        $topic = Topic::onlyTrashed()->find($this->topicToRestore);
+        $topic = auth()->user()->topics()->onlyTrashed()->find($this->topicToRestore);
         if ($topic) {
             $topic->restore();
             session()->flash('message', 'Topic restored successfully.');
@@ -112,7 +112,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     public function forceDeleteTopic(): void
     {
         if (!$this->topicToForceDelete) return;
-        $topic = Topic::onlyTrashed()->find($this->topicToForceDelete);
+        $topic = auth()->user()->topics()->onlyTrashed()->find($this->topicToForceDelete);
         if ($topic) {
             $topic->forceDelete();
             session()->flash('message', 'Topic permanently deleted.');
@@ -123,8 +123,9 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
 
     public function with(): array
     {
+        $user = auth()->user();
         return [
-            'categories' => Category::query()
+            'categories' => $user->categories()
                 ->when($this->showArchived, fn($q) => $q->onlyTrashed(), fn($q) => $q->withoutTrashed())
                 ->with('topic')
                 ->when($this->search, fn($q) => $q->where('title', 'like', "%{$this->search}%"))
@@ -144,8 +145,8 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
                     $q->orderBy($this->sortBy, $this->sortDirection);
                 })
                 ->paginate($this->perPage),
-            'totalCategories' => Category::count(),
-            'topics' => Topic::query()
+            'totalCategories' => $user->categories()->count(),
+            'topics' => $user->topics()
                 ->when($this->showArchivedTopics, fn($q) => $q->onlyTrashed(), fn($q) => $q->withoutTrashed())
                 ->withCount('categories')
                 ->orderBy('name')
@@ -177,10 +178,10 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
         $this->validate(['topicName' => 'required|string|max:255']);
 
         if ($this->editingTopicId) {
-            Topic::where('id', $this->editingTopicId)->update(['name' => $this->topicName]);
+            auth()->user()->topics()->where('id', $this->editingTopicId)->update(['name' => $this->topicName]);
             session()->flash('message', 'Topic updated successfully.');
         } else {
-            Topic::create(['name' => $this->topicName]);
+            auth()->user()->topics()->create(['name' => $this->topicName]);
             session()->flash('message', 'Topic created successfully.');
         }
 
@@ -205,7 +206,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     {
         if (!$this->topicToDelete) return;
 
-        $topic = Topic::find($this->topicToDelete);
+        $topic = auth()->user()->topics()->find($this->topicToDelete);
         if ($topic) {
             if ($this->topicFilter === $topic->id) {
                 $this->topicFilter = null;
@@ -234,7 +235,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     {
         if (!$this->categoryToDelete) return;
 
-        $category = Category::find($this->categoryToDelete);
+        $category = auth()->user()->categories()->find($this->categoryToDelete);
         if ($category) {
             $category->delete();
             session()->flash('message', 'Category archived successfully.');
@@ -260,7 +261,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     {
         if (!$this->categoryToRestore) return;
 
-        $category = Category::onlyTrashed()->find($this->categoryToRestore);
+        $category = auth()->user()->categories()->onlyTrashed()->find($this->categoryToRestore);
         if ($category) {
             $category->restore();
             session()->flash('message', 'Category restored successfully.');
@@ -286,7 +287,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     {
         if (!$this->categoryToForceDelete) return;
 
-        $category = Category::onlyTrashed()->find($this->categoryToForceDelete);
+        $category = auth()->user()->categories()->onlyTrashed()->find($this->categoryToForceDelete);
         if ($category) {
             $category->forceDelete();
             session()->flash('message', 'Category permanently deleted.');
@@ -296,11 +297,14 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
 
     public function setCategoryTopic(Category $category, ?string $topicId): void
     {
+        // Use route model binding + additional check for safety
+        if ($category->user_id !== auth()->id()) return;
         $category->update(['topic_id' => $topicId ?: null]);
     }
 
     public function togglePlayed(Category $category): void
     {
+        if ($category->user_id !== auth()->id()) return;
         $category->update([
             'played_at' => $category->played_at ? null : now(),
         ]);
@@ -311,7 +315,7 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
         $this->showImportModal = false;
         
         try {
-            \Illuminate\Support\Facades\Artisan::call('db:seed', ['--class' => 'StarterPackSeeder']);
+            (new \Database\Seeders\StarterPackSeeder())->run(auth()->id());
             session()->flash('message', 'Starter pack imported successfully.');
         } catch (\Exception $e) {
             session()->flash('error', 'Failed to import starter pack: ' . $e->getMessage());
@@ -321,14 +325,14 @@ new #[Layout('components.layouts.app')] #[Title('Categories')] class extends Com
     public function removeStarterPack(): void
     {
         $this->showRemoveModal = false;
-        $count = Category::where('is_starter', true)->count();
-        Category::where('is_starter', true)->delete();
+        $count = auth()->user()->categories()->where('is_starter', true)->count();
+        auth()->user()->categories()->where('is_starter', true)->delete();
         session()->flash('message', "Archived {$count} starter pack categories.");
     }
 
     public function hasStarterPack(): bool
     {
-        return Category::where('is_starter', true)->exists();
+        return auth()->user()->categories()->where('is_starter', true)->exists();
     }
 
     public function getStarterPackCount(): int

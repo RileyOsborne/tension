@@ -48,6 +48,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
     public function mount(Game $game): void
     {
+        abort_unless($game->user_id === auth()->id(), 403);
         $this->game = $game->load(['players', 'rounds.category']);
         $this->gameName = $game->name;
 
@@ -112,7 +113,8 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
     public function with(): array
     {
-        $baseQuery = Category::with('topic')
+        $user = auth()->user();
+        $baseQuery = $user->categories()->with('topic')
             ->whereHas('answers', function ($q) {
                 $q->where('position', '<=', 10);
             }, '>=', 10);
@@ -132,7 +134,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         return [
             'categories' => $categories,
             'totalCategories' => $totalCategories,
-            'topics' => Topic::orderBy('name')->get(),
+            'topics' => $user->topics()->orderBy('name')->get(),
             'effectivePlayerCount' => $effectivePlayerCount,
             'effectiveTotalRounds' => $effectiveTotalRounds,
             'activePlayers' => $activePlayers,
@@ -235,11 +237,11 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
 
         $topicId = $this->categoryTopicId;
         if ($this->categoryTopicId === '__new__' && !empty($this->newTopicName)) {
-            $topic = Topic::create(['name' => trim($this->newTopicName)]);
+            $topic = auth()->user()->topics()->create(['name' => trim($this->newTopicName)]);
             $topicId = $topic->id;
         }
 
-        $category = Category::create([
+        $category = auth()->user()->categories()->create([
             'title' => $this->categoryTitle,
             'description' => $this->categoryDescription ?: null,
             'topic_id' => $topicId,
@@ -337,7 +339,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         $usedCategoryIds = array_values($this->roundCategories);
         $currentSelection = $this->roundCategories[$roundNumber] ?? null;
 
-        $available = Category::with('topic')
+        $available = auth()->user()->categories()->with('topic')
             ->whereHas('answers', function ($q) {
                 $q->where('position', '<=', 10);
             }, '>=', 10)
@@ -367,7 +369,7 @@ new #[Layout('components.layouts.app')] #[Title('Game Setup')] class extends Com
         $activePlayers = $this->game->players->filter(fn($p) => $p->isActive());
         $effectiveTotalRounds = $activePlayers->count() * ($this->game->rounds_per_player ?? 2);
 
-        $available = Category::with('topic')
+        $available = auth()->user()->categories()->with('topic')
             ->whereHas('answers', function ($q) {
                 $q->where('position', '<=', 10);
             }, '>=', 10)

@@ -48,7 +48,7 @@ new #[Layout('components.layouts.app')] #[Title('Games')] class extends Componen
     {
         if (!$this->gameToDelete) return;
 
-        $game = Game::find($this->gameToDelete);
+        $game = auth()->user()->games()->find($this->gameToDelete);
         if (!$game) {
             $this->cancelDelete();
             return;

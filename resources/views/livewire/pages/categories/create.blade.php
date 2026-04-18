@@ -95,6 +95,7 @@ new #[Layout('components.layouts.app')] #[Title('Create Category')] class extend
         ]);
 
         $category = Category::create([
+            'user_id' => auth()->id(),
             'title' => $this->title,
             'description' => $this->description,
         ]);

@@ -19,6 +19,8 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
 
     public function mount(Category $category): void
     {
+        abort_unless($category->user_id === auth()->id(), 403);
+
         $this->category = $category;
         $this->title = $category->title;
         $this->description = $category->description ?? '';
@@ -40,7 +42,7 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
     public function with(): array
     {
         return [
-            'topics' => Topic::orderBy('name')->get(),
+            'topics' => auth()->user()->topics()->orderBy('name')->get(),
         ];
     }
 
@@ -119,7 +121,7 @@ new #[Layout('components.layouts.app')] #[Title('Edit Category')] class extends 
         // Handle new topic creation
         $topicId = $this->topicId;
         if ($this->topicId === '__new__' && !empty($this->newTopicName)) {
-            $topic = Topic::create(['name' => trim($this->newTopicName)]);
+            $topic = auth()->user()->topics()->create(['name' => trim($this->newTopicName)]);
             $topicId = $topic->id;
         } elseif ($this->topicId === '__new__') {
             $topicId = null;
