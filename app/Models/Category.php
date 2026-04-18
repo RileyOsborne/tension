@@ -22,6 +22,7 @@ class Category extends Model
     use HasFactory, HasUlids, SoftDeletes;
 
     protected $fillable = [
+        'user_id',
         'topic_id',
         'title',
         'description',
@@ -33,6 +34,14 @@ class Category extends Model
         'played_at' => 'datetime',
         'is_starter' => 'boolean',
     ];
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\User, $this>
+     */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
 
     /**
      * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\Topic, $this>

@@ -36,6 +36,7 @@ class Game extends Model
     use HasFactory, HasUlids;
 
     protected $fillable = [
+        'user_id',
         'name',
         'player_count',
         'total_rounds',
@@ -74,6 +75,14 @@ class Game extends Model
         'doubles_per_player' => 'integer',
         'max_answers_per_category' => 'integer',
     ];
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\App\Models\User, $this>
+     */
+    public function user(): \Illuminate\Database\Eloquent\Relations\BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
 
     /**
      * @return \Illuminate\Database\Eloquent\Relations\HasMany<\App\Models\Player, $this>

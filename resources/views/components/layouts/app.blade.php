@@ -40,6 +40,25 @@
                         <a href="{{ route('rules') }}" class="{{ request()->routeIs('rules') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Rules</a>
                     </div>
                 </div>
+
+                <div class="flex items-center space-x-8">
+                    @auth
+                        <div class="flex items-center space-x-6">
+                            <span class="text-slate-400 text-sm font-bold uppercase tracking-widest">{{ auth()->user()->name }}</span>
+                            <form method="POST" action="{{ route('logout') }}" id="logout-form">
+                                @csrf
+                                <button type="submit" class="text-slate-400 hover:text-red-400 text-sm font-bold uppercase tracking-widest transition">
+                                    Logout
+                                </button>
+                            </form>
+                        </div>
+                    @else
+                        <div class="flex items-center space-x-8 text-sm font-bold uppercase tracking-widest">
+                            <a href="{{ route('login') }}" class="{{ request()->routeIs('login') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Login</a>
+                            <a href="{{ route('register') }}" class="{{ request()->routeIs('register') ? 'text-white' : 'text-slate-400' }} hover:text-white transition border-2 border-blue-600 px-6 py-2 rounded-xl hover:bg-blue-600 hover:text-white">Register</a>
+                        </div>
+                    @endauth
+                </div>
             </div>
         </div>
     </nav>

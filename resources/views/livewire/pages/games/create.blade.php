@@ -15,6 +15,7 @@ new #[Layout('components.layouts.app')] #[Title('Create Game')] class extends Co
         ]);
 
         $game = Game::create([
+            'user_id' => auth()->id(),
             'name' => $this->name,
         ]);
 

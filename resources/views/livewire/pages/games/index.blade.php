@@ -23,7 +23,7 @@ new #[Layout('components.layouts.app')] #[Title('Games')] class extends Componen
     public function with(): array
     {
         return [
-            'games' => Game::query()
+            'games' => auth()->user()->games()
                 ->withCount('players', 'rounds')
                 ->latest()
                 ->paginate($this->perPage),
@@ -91,6 +91,7 @@ new #[Layout('components.layouts.app')] #[Title('Games')] class extends Componen
     public function createGame(): void
     {
         $game = Game::create([
+            'user_id' => auth()->id(),
             'name' => 'New Game ' . now()->format('M j, Y'),
             'status' => 'draft',
         ]);

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\PlayerJoinController;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
 
 // Home - redirect to games
@@ -9,25 +10,42 @@ Route::get('/', function () {
     return redirect()->route('games.index');
 });
 
+// Auth Routes
+Route::middleware('guest')->group(function () {
+    Volt::route('/login', 'pages.auth.login')->name('login');
+    Volt::route('/register', 'pages.auth.register')->name('register');
+});
+
+Route::post('/logout', function () {
+    Auth::logout();
+    session()->invalidate();
+    session()->regenerateToken();
+    return redirect('/');
+})->name('logout');
+
 // Rules page
 Volt::route('/rules', 'pages.rules')->name('rules');
 
-// Category management
-Volt::route('/categories', 'pages.categories.index')->name('categories.index');
-Volt::route('/categories/create', 'pages.categories.create')->name('categories.create');
-Volt::route('/categories/{category}', 'pages.categories.show')->name('categories.show');
-Volt::route('/categories/{category}/edit', 'pages.categories.edit')->name('categories.edit');
+// Authenticated Routes
+Route::middleware('auth')->group(function () {
+    // Category management
+    Volt::route('/categories', 'pages.categories.index')->name('categories.index');
+    Volt::route('/categories/create', 'pages.categories.create')->name('categories.create');
+    Volt::route('/categories/{category}', 'pages.categories.show')->name('categories.show');
+    Volt::route('/categories/{category}/edit', 'pages.categories.edit')->name('categories.edit');
 
-// Game management
-Volt::route('/games', 'pages.games.index')->name('games.index');
-Volt::route('/games/create', 'pages.games.create')->name('games.create');
-Volt::route('/games/{game}', 'pages.games.show')->name('games.show');
-Volt::route('/games/{game}/edit', 'pages.games.edit')->name('games.edit');
+    // Game management
+    Volt::route('/games', 'pages.games.index')->name('games.index');
+    Volt::route('/games/create', 'pages.games.create')->name('games.create');
+    Volt::route('/games/{game}', 'pages.games.show')->name('games.show');
+    Volt::route('/games/{game}/edit', 'pages.games.edit')->name('games.edit');
 
-// Gameplay (Two-Tab System)
-Volt::route('/games/{game}/control', 'pages.games.control')->name('games.control');
+    // Gameplay (Two-Tab System)
+    Volt::route('/games/{game}/control', 'pages.games.control')->name('games.control');
+});
 
 // Presentation view (regular Blade, not Livewire - it's all JavaScript)
+// Public so people in the room can see it
 Route::get('/games/{game}/present', function (\App\Models\Game $game) {
     $game->load(['players', 'rounds.category.answers', 'rounds.playerAnswers.player']);
     return view('games.present', compact('game'));
@@ -39,7 +57,7 @@ Route::get('/present/{gameId}/not-found', function () {
     return response()->view('games.present-not-found');
 })->name('games.present.not-found');
 
-// Player device routes
+// Player device routes (Public - players join via code)
 Route::get('/join', [PlayerJoinController::class, 'index'])->name('player.join');
 Route::post('/join', [PlayerJoinController::class, 'findGame'])->name('player.join.find');
 
