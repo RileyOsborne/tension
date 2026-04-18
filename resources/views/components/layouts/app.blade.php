@@ -35,8 +35,10 @@
                 <div class="flex items-center space-x-16">
                     <a href="/" class="text-4xl font-title"><span class="inline-flex items-baseline"><span class="text-white">FRIC</span><span class="text-red-500 ml-[0.04em]">TION</span></span></a>
                     <div class="flex items-center space-x-10 text-base font-black uppercase tracking-widest">
-                        <a href="{{ route('games.index') }}" class="{{ request()->routeIs('games.*') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Games</a>
-                        <a href="{{ route('categories.index') }}" class="{{ request()->routeIs('categories.*') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Categories</a>
+                        @auth
+                            <a href="{{ route('games.index') }}" class="{{ request()->routeIs('games.*') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Games</a>
+                            <a href="{{ route('categories.index') }}" class="{{ request()->routeIs('categories.*') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Categories</a>
+                        @endauth
                         <a href="{{ route('rules') }}" class="{{ request()->routeIs('rules') ? 'text-white' : 'text-slate-400' }} hover:text-white transition">Rules</a>
                     </div>
                 </div>

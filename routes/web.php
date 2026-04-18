@@ -5,9 +5,12 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Volt\Volt;
 
-// Home - redirect to games
+// Home - redirect to games or login
 Route::get('/', function () {
-    return redirect()->route('games.index');
+    if (Auth::check()) {
+        return redirect()->route('games.index');
+    }
+    return redirect()->route('login');
 });
 
 // Auth Routes
